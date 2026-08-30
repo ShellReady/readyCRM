@@ -558,6 +558,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     success: boolean;
     botName?: string;
     workspaceName?: string;
+    databasesChecked?: { id: string; name: string; accessible: boolean; title?: string }[];
+    missingAccessNotice?: string;
     error?: string;
   }> => {
     try {
@@ -572,6 +574,15 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           configDbId: notionConfig.configDbId,
         }),
       });
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        return {
+          success: false,
+          error: 'El backend de sincronización está procesando la solicitud. Si estás en Netlify, asegúrate de haber importado las funciones y variables.',
+        };
+      }
+
       const data = await response.json();
       return data;
     } catch (err: any) {
@@ -613,6 +624,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Respuesta no válida del servidor. Verifica el despliegue de funciones en Netlify.');
+      }
 
       const result: NotionSyncResult = await response.json();
 
@@ -668,6 +684,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           prospectsDbId: notionConfig.prospectsDbId,
         }),
       });
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Respuesta no válida del servidor. Verifica el despliegue de funciones en Netlify.');
+      }
 
       const result: NotionSyncResult = await response.json();
 
