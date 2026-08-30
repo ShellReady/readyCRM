@@ -13,12 +13,12 @@ import {
   pullDataFromNotion,
 } from "../../server/notion";
 
-// Model candidate list in priority order
+// Model candidate list in priority order (using valid Gemini 3 models)
 const GEMINI_MODELS = [
   "gemini-3.7-flash",
-  "gemini-3.6-flash",
   "gemini-3.1-flash-lite",
   "gemini-flash-latest",
+  "gemini-3.1-pro-preview",
 ];
 
 function getGeminiClient(): GoogleGenAI | null {
@@ -36,17 +36,25 @@ async function generateContentWithFallback(
   config?: any
 ): Promise<{ text: string; modelUsed: string } | null> {
   for (const model of GEMINI_MODELS) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config,
-      });
-      if (response && response.text) {
-        return { text: response.text, modelUsed: model };
+    // Try up to 2 attempts per model for transient 503/429 spikes
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config,
+        });
+        if (response && response.text) {
+          return { text: response.text, modelUsed: model };
+        }
+      } catch (err: any) {
+        const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes("503") || err?.message?.includes("demand");
+        if (isTransient && attempt === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          continue;
+        }
+        break;
       }
-    } catch (err: any) {
-      console.warn(`Model ${model} unavailable:`, err?.message || err);
     }
   }
   return null;
@@ -179,6 +187,8 @@ export const handler = async (event: any, _context: any) => {
         apiKey: body.apiKey,
         configDbId: body.configDbId,
         prospectsDbId: body.prospectsDbId,
+        companiesDbId: body.companiesDbId,
+        logsDbId: body.logsDbId,
       });
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }

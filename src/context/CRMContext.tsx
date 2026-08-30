@@ -682,6 +682,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           apiKey: notionConfig.apiKey,
           configDbId: notionConfig.configDbId || notionConfig.prospectsDbId,
           prospectsDbId: notionConfig.prospectsDbId,
+          companiesDbId: notionConfig.companiesDbId,
+          logsDbId: notionConfig.logsDbId,
         }),
       });
 

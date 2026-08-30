@@ -179,11 +179,13 @@ app.post("/api/notion/push-all", async (req, res) => {
 // Pull CRM data from Notion
 app.post("/api/notion/pull-all", async (req, res) => {
   try {
-    const { apiKey, configDbId, prospectsDbId } = req.body || {};
+    const { apiKey, configDbId, prospectsDbId, companiesDbId, logsDbId } = req.body || {};
     const result = await pullDataFromNotion({
       apiKey,
       configDbId,
       prospectsDbId,
+      companiesDbId,
+      logsDbId,
     });
     return res.json(result);
   } catch (error: any) {
@@ -192,16 +194,16 @@ app.post("/api/notion/pull-all", async (req, res) => {
   }
 });
 
-// Model candidate list in priority order (using active Gemini 3 models)
+// Model candidate list in priority order (using valid Gemini 3 models)
 const GEMINI_MODELS = [
   "gemini-3.7-flash",
-  "gemini-3.6-flash",
   "gemini-3.1-flash-lite",
   "gemini-flash-latest",
+  "gemini-3.1-pro-preview",
 ];
 
 /**
- * Resilient helper to call Gemini with multi-model fallback and error catching
+ * Resilient helper to call Gemini with multi-model fallback, retry backoff on 503/429, and error catching
  */
 async function generateContentWithFallback(
   ai: GoogleGenAI,
@@ -209,18 +211,27 @@ async function generateContentWithFallback(
   config?: any
 ): Promise<{ text: string; modelUsed: string } | null> {
   for (const model of GEMINI_MODELS) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config,
-      });
-      if (response && response.text) {
-        return { text: response.text, modelUsed: model };
+    // Try up to 2 attempts per model for transient 503/429 spikes
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config,
+        });
+        if (response && response.text) {
+          return { text: response.text, modelUsed: model };
+        }
+      } catch (err: any) {
+        const isTransient = err?.status === 503 || err?.status === 429 || err?.message?.includes("503") || err?.message?.includes("demand");
+        if (isTransient && attempt === 1) {
+          // Wait briefly before retry
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          continue;
+        }
+        // Move immediately to next fallback model
+        break;
       }
-    } catch (err: any) {
-      console.warn(`Model ${model} unavailable or failed:`, err?.message || err);
-      // Continue to next model if 503, 429, or other transient error
     }
   }
   return null;
