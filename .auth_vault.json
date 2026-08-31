@@ -1,0 +1,6 @@
+{
+  "passwordHash": "d7139ffb6172951bbe2a1f5e2e7a56615269c482fd1afa3ae04766a3631da30a3ed1a8eae0934975e049cc94400c892d67287554ac441d0702006f3144110e58",
+  "salt": "b46c605ffc2ad5e6dc5d70dcaa7b116a",
+  "iterations": 100000,
+  "lastUpdated": "2026-08-31T21:02:10.184Z"
+}
