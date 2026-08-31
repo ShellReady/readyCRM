@@ -5,7 +5,8 @@ import {
   resendChallengeCode,
   verifySessionToken,
   changePassword,
-  authenticateWithGoogle,
+  verifyGoogleIdToken,
+  verifyGoogleAccessToken,
 } from "../../server/auth";
 import {
   testNotionConnection,
@@ -67,6 +68,16 @@ const headers = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
+function checkAuth(event: any): { authorized: boolean; user?: any } {
+  const authHeader = event.headers?.authorization || event.headers?.Authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return { authorized: false };
+  }
+  const token = authHeader.substring(7);
+  const session = verifySessionToken(token);
+  return { authorized: !!session.valid, user: session.user };
+}
+
 export const handler = async (event: any, _context: any) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers, body: "" };
@@ -98,37 +109,42 @@ export const handler = async (event: any, _context: any) => {
           status: "ok",
           platform: "netlify-functions",
           hasApiKey: !!process.env.GEMINI_API_KEY,
-          authorizedEmail: process.env.AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com",
           timestamp: new Date().toISOString(),
         }),
       };
     }
 
-    // 2. Auth: Google Login
-    if (path === "/auth/google-login") {
-      const result = await authenticateWithGoogle(body.email);
+    // 2. Auth: Google ID Token (Google Identity Services)
+    if (path === "/auth/google-verify-id-token") {
+      const result = await verifyGoogleIdToken(body.idToken);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 3. Auth: Step 1 Password
+    // 3. Auth: Google Access Token (OAuth 2.0 Token Client)
+    if (path === "/auth/google-verify-access-token") {
+      const result = await verifyGoogleAccessToken(body.accessToken);
+      return { statusCode: 200, headers, body: JSON.stringify(result) };
+    }
+
+    // 4. Auth: Step 1 Password (fallback)
     if (path === "/auth/login-step1") {
       const result = await authenticateStep1(body.password);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 4. Auth: Step 2 2FA Code
+    // 5. Auth: Step 2 2FA Code
     if (path === "/auth/login-step2") {
       const result = await authenticateStep2(body.challengeToken, body.code);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 5. Auth: Resend Code
+    // 6. Auth: Resend Code
     if (path === "/auth/resend-code") {
       const result = await resendChallengeCode(body.challengeToken);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 6. Auth: Verify Session
+    // 7. Auth: Verify Session
     if (path === "/auth/verify-session") {
       const authHeader = event.headers?.authorization || event.headers?.Authorization;
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -139,22 +155,42 @@ export const handler = async (event: any, _context: any) => {
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 7. Auth: Change Password
+    // 8. Auth: Change Password (Protected)
     if (path === "/auth/change-password") {
-      const authHeader = event.headers?.authorization || event.headers?.Authorization;
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      const auth = checkAuth(event);
+      if (!auth.authorized) {
         return { statusCode: 401, headers, body: JSON.stringify({ success: false, error: "No autorizado." }) };
-      }
-      const token = authHeader.substring(7);
-      const session = verifySessionToken(token);
-      if (!session.valid) {
-        return { statusCode: 401, headers, body: JSON.stringify({ success: false, error: "Sesión inválida." }) };
       }
       const result = await changePassword(body.currentPassword, body.newPassword);
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 8. Notion: Test Connection
+    // Protected routes require valid auth
+    const protectedRoutes = [
+      "/notion/test-connection",
+      "/notion/push-all",
+      "/notion/pull-all",
+      "/evaluate-icp",
+      "/chat/resource",
+      "/chat/coach",
+      "/propose-notebook-update",
+    ];
+
+    if (protectedRoutes.includes(path)) {
+      const auth = checkAuth(event);
+      if (!auth.authorized) {
+        return {
+          statusCode: 401,
+          headers,
+          body: JSON.stringify({
+            success: false,
+            error: "Acceso no autorizado. Se requiere inicio de sesión con cuenta de Google autorizada.",
+          }),
+        };
+      }
+    }
+
+    // 9. Notion: Test Connection
     if (path === "/notion/test-connection") {
       const result = await testNotionConnection(body.apiKey, {
         prospectsDbId: body.prospectsDbId,
@@ -165,7 +201,7 @@ export const handler = async (event: any, _context: any) => {
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 9. Notion: Push All Data
+    // 10. Notion: Push All Data
     if (path === "/notion/push-all") {
       if (!body.data) {
         return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: "Faltan los datos del CRM." }) };
@@ -181,7 +217,7 @@ export const handler = async (event: any, _context: any) => {
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 10. Notion: Pull All Data
+    // 11. Notion: Pull All Data
     if (path === "/notion/pull-all") {
       const result = await pullDataFromNotion({
         apiKey: body.apiKey,
@@ -193,7 +229,7 @@ export const handler = async (event: any, _context: any) => {
       return { statusCode: 200, headers, body: JSON.stringify(result) };
     }
 
-    // 11. ICP Evaluation
+    // 12. ICP Evaluation
     if (path === "/evaluate-icp") {
       const { lead, company, interactions } = body;
       if (!lead) {
@@ -233,7 +269,7 @@ export const handler = async (event: any, _context: any) => {
       };
     }
 
-    // 12. Chat Resource Assistant
+    // 13. Chat Resource Assistant
     if (path === "/chat/resource") {
       const { message, leadContext, companyResources } = body;
       const resource = companyResources?.[0] || { name: "Video Demostrativo ROI", link: "https://drive.google.com" };
@@ -241,7 +277,7 @@ export const handler = async (event: any, _context: any) => {
       return { statusCode: 200, headers, body: JSON.stringify({ reply }) };
     }
 
-    // 13. Chat BDR Coach
+    // 14. Chat BDR Coach
     if (path === "/chat/coach") {
       const reply = `🥋 **Consejo del Coach BDR:**\n1. Valida la postura del prospecto.\n2. Haz una pregunta de contraste.\n3. Ofrece un diagnóstico rápido de 15 minutos sin compromiso.`;
       return { statusCode: 200, headers, body: JSON.stringify({ reply }) };

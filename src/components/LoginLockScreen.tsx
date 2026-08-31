@@ -9,39 +9,82 @@ import {
   Sun,
   Moon,
   RefreshCw,
-  CheckCircle2,
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from 'lucide-react';
 
 export const LoginLockScreen: React.FC = () => {
   const {
     loginWithGoogle,
-    authorizedEmail,
+    loginWithCredentials,
     isDarkMode,
     toggleDarkMode,
     companies,
   } = useCRM();
 
-  // UI state
+  // Auth Mode: 'google' | 'password'
+  const [authMode, setAuthMode] = useState<'google' | 'password'>('google');
+
+  // Credentials form state
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  // UI status
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const targetAccount = authorizedEmail || 'ronitovar.digital@gmail.com';
-
+  // Handle Google Login
   const handleGoogleLogin = async () => {
     setErrorMsg(null);
     setIsLoading(true);
 
     try {
-      const result = await loginWithGoogle(targetAccount);
+      const result = await loginWithGoogle();
       if (!result.success) {
         setErrorMsg(
           result.error ||
-            'No se pudo autenticar la cuenta de Google. Verifica que sea la cuenta autorizada.'
+            'No se pudo verificar la cuenta de Google. Verifica que sea la cuenta autorizada del CRM.'
         );
         setIsLoading(false);
       }
     } catch (err: any) {
       setErrorMsg('Error de conexión al iniciar sesión con Google.');
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Email + Password Login
+  const handleCredentialsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (!emailInput.trim()) {
+      setErrorMsg('Por favor ingresa tu correo electrónico.');
+      return;
+    }
+
+    if (!passwordInput) {
+      setErrorMsg('Por favor ingresa tu contraseña de acceso.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const result = await loginWithCredentials(emailInput, passwordInput);
+      if (!result.success) {
+        setErrorMsg(
+          result.error ||
+            'Credenciales incorrectas. Verifica tu correo y contraseña.'
+        );
+        setIsLoading(false);
+      }
+    } catch (err: any) {
+      setErrorMsg('Error al conectar con el servidor de autenticación.');
       setIsLoading(false);
     }
   };
@@ -87,14 +130,39 @@ export const LoginLockScreen: React.FC = () => {
         </button>
       </header>
 
-      {/* Main Google Auth Card */}
-      <main className="max-w-md w-full mx-auto my-8 space-y-6 animate-fadeIn">
+      {/* Main Authentication Card */}
+      <main className="max-w-md w-full mx-auto my-6 space-y-5 animate-fadeIn">
         <div className="p-6 sm:p-8 rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm space-y-6">
           
+          {/* Header */}
           <div className="text-center space-y-2">
-            <div className="w-14 h-14 rounded-2xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 mx-auto flex items-center justify-center shadow-xs">
-              {/* Google Official G Icon */}
-              <svg className="w-7 h-7" viewBox="0 0 24 24">
+            <div className="w-12 h-12 rounded-2xl bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 mx-auto flex items-center justify-center shadow-xs">
+              <Lock className="w-6 h-6 text-stone-800 dark:text-stone-200" />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-stone-900 dark:text-white">
+              Acceso Seguro al CRM
+            </h1>
+            <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 leading-relaxed">
+              Ingresa tus credenciales o inicia sesión con tu Cuenta de Google autorizada.
+            </p>
+          </div>
+
+          {/* Auth Method Selector Tabs */}
+          <div className="grid grid-cols-2 p-1 rounded-xl bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700/80 text-xs font-semibold">
+            <button
+              type="button"
+              id="tab-auth-google"
+              onClick={() => {
+                setAuthMode('google');
+                setErrorMsg(null);
+              }}
+              className={`py-2 px-3 rounded-lg flex items-center justify-center space-x-2 transition ${
+                authMode === 'google'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -112,33 +180,28 @@ export const LoginLockScreen: React.FC = () => {
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-            </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-stone-900 dark:text-white">
-              Acceso con Google
-            </h1>
-            <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 leading-relaxed">
-              Inicia sesión con tu Cuenta de Google autorizada para acceder al CRM de prospección.
-            </p>
+              <span>Cuenta Google</span>
+            </button>
+
+            <button
+              type="button"
+              id="tab-auth-password"
+              onClick={() => {
+                setAuthMode('password');
+                setErrorMsg(null);
+              }}
+              className={`py-2 px-3 rounded-lg flex items-center justify-center space-x-2 transition ${
+                authMode === 'password'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              <KeyRound className="w-4 h-4 flex-shrink-0 text-stone-700 dark:text-stone-300" />
+              <span>Contraseña</span>
+            </button>
           </div>
 
-          {/* Authorized Account Badge */}
-          <div className="p-3.5 rounded-xl bg-stone-50 dark:bg-stone-800/70 border border-stone-200 dark:border-stone-700/80 flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-full bg-stone-900 dark:bg-white text-white dark:text-stone-900 font-bold text-xs flex items-center justify-center flex-shrink-0">
-              RT
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center space-x-1.5">
-                <span className="text-xs font-semibold text-stone-900 dark:text-stone-100 truncate">
-                  {targetAccount}
-                </span>
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-              </div>
-              <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                Cuenta Autorizada · Master BDR/Setter
-              </p>
-            </div>
-          </div>
-
+          {/* Error Banner */}
           {errorMsg && (
             <div
               id="auth-error-banner"
@@ -149,45 +212,136 @@ export const LoginLockScreen: React.FC = () => {
             </div>
           )}
 
-          {/* Primary Google Login Button */}
-          <div className="space-y-3">
-            <button
-              id="btn-google-sign-in"
-              type="button"
-              disabled={isLoading}
-              onClick={handleGoogleLogin}
-              className="w-full py-3 px-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-white hover:bg-stone-50 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-white text-sm font-semibold flex items-center justify-center space-x-3 transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed hover:border-stone-400 dark:hover:border-stone-600"
-            >
-              {isLoading ? (
-                <span className="flex items-center space-x-2">
-                  <RefreshCw className="w-4 h-4 animate-spin text-stone-600 dark:text-stone-300" />
-                  <span>Autenticando con Google...</span>
+          {/* Tab 1: Google Login */}
+          {authMode === 'google' && (
+            <div className="space-y-4 animate-fadeIn">
+              <p className="text-xs text-stone-600 dark:text-stone-400 text-center">
+                Autenticación directa con Google Identity y verificación federada de cuenta.
+              </p>
+
+              <button
+                id="btn-google-sign-in"
+                type="button"
+                disabled={isLoading}
+                onClick={handleGoogleLogin}
+                className="w-full py-3 px-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-white hover:bg-stone-50 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-white text-sm font-semibold flex items-center justify-center space-x-3 transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed hover:border-stone-400 dark:hover:border-stone-600"
+              >
+                {isLoading ? (
+                  <span className="flex items-center space-x-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-stone-600 dark:text-stone-300" />
+                    <span>Verificando con Google...</span>
+                  </span>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                    <span>Continuar con Google</span>
+                  </>
+                )}
+              </button>
+
+              <div className="pt-2 text-center">
+                <span className="text-[11px] text-stone-500 dark:text-stone-400">
+                  ¿Prefieres ingresar con clave? Cambia a la pestaña <strong>Contraseña</strong>.
                 </span>
-              ) : (
-                <>
-                  <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    />
-                  </svg>
-                  <span>Continuar con Google</span>
-                </>
-              )}
-            </button>
-          </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Email + Password Form */}
+          {authMode === 'password' && (
+            <form onSubmit={handleCredentialsSubmit} className="space-y-4 animate-fadeIn">
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300">
+                  Correo Electrónico
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    id="input-auth-email"
+                    required
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="nombre@empresa.com"
+                    autoComplete="email"
+                    className="w-full pl-9 pr-4 py-2.5 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-white placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-900 dark:focus:ring-stone-400"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300">
+                    Contraseña de Acceso
+                  </label>
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    id="input-auth-password"
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="••••••••••••"
+                    autoComplete="current-password"
+                    className="w-full pl-9 pr-10 py-2.5 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-white placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-900 dark:focus:ring-stone-400"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                id="btn-password-sign-in"
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 text-xs font-bold transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Verificando credenciales...</span>
+                  </>
+                ) : (
+                  <span>Iniciar Sesión</span>
+                )}
+              </button>
+
+              <div className="text-center pt-1">
+                <span className="text-[11px] text-stone-500 dark:text-stone-400">
+                  Cifrado seguro PBKDF2 con Salt criptográfico único.
+                </span>
+              </div>
+            </form>
+          )}
 
           {/* Security Features Info */}
           <div className="pt-3 border-t border-stone-100 dark:border-stone-800 space-y-2.5">
@@ -214,7 +368,7 @@ export const LoginLockScreen: React.FC = () => {
         <div className="text-center">
           <div className="inline-flex items-center space-x-1.5 text-[11px] text-stone-500 dark:text-stone-400">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>Acceso seguro mediante Google Identity & Token de sesión firmado</span>
+            <span>Autenticación dual segura · Sesión firmada con expiración de 7 días</span>
           </div>
         </div>
       </main>

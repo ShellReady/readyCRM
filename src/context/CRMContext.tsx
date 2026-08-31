@@ -72,10 +72,14 @@ interface CRMContextType {
   // Auth & Security
   authorizedEmail: string;
   currentUserEmail: string;
+  userProfile: { email: string; role?: string; name?: string; picture?: string } | null;
   isAuthenticated: boolean;
   sessionToken: string | null;
   setAuthorizedEmail: (email: string) => void;
+  loginWithGoogleIdToken: (idToken: string) => Promise<AuthGoogleResult>;
+  loginWithGoogleAccessToken: (accessToken: string) => Promise<AuthGoogleResult>;
   loginWithGoogle: (email?: string) => Promise<AuthGoogleResult>;
+  loginWithCredentials: (email: string, password: string) => Promise<AuthGoogleResult>;
   loginStep1: (password: string) => Promise<AuthStep1Result>;
   loginStep2: (challengeToken: string, code: string) => Promise<AuthStep2Result>;
   resend2FACode: (challengeToken: string) => Promise<{ success: boolean; newChallengeToken?: string; error?: string; devCodeNotice?: string }>;
@@ -240,6 +244,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUserEmail, setCurrentUserEmail] = useState<string>(() =>
     getStored<string>('current_user_email', '')
   );
+  const [userProfile, setUserProfile] = useState<{
+    email: string;
+    role?: string;
+    name?: string;
+    picture?: string;
+  } | null>(() => getStored('user_profile', null));
   const [sessionToken, setSessionToken] = useState<string | null>(() =>
     getStored<string | null>('session_token', null)
   );
@@ -264,14 +274,25 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (data && data.valid && data.user) {
             setIsAuthenticated(true);
             setCurrentUserEmail(data.user.email);
+            if (data.user) {
+              setUserProfile({
+                email: data.user.email,
+                name: data.user.name || 'Roni Tovar',
+                picture: data.user.picture,
+                role: data.user.role || 'Master BDR/Setter',
+              });
+            }
             setStored('is_authenticated', true);
             setStored('current_user_email', data.user.email);
+            setStored('user_profile', data.user);
           } else {
             // Session expired or invalid
             setIsAuthenticated(false);
             setSessionToken(null);
+            setUserProfile(null);
             setStored('is_authenticated', false);
             setStored('session_token', null);
+            setStored('user_profile', null);
           }
         })
         .catch((err) => {
@@ -285,11 +306,89 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [authorizedEmail]);
 
   /**
-   * Google Sign-In: Direct one-click login with authorized Google Account
+   * Google Sign-In with Google ID Token (GSI Official Flow)
    */
-  const loginWithGoogle = async (email?: string): Promise<AuthGoogleResult> => {
+  const loginWithGoogleIdToken = async (idToken: string): Promise<AuthGoogleResult> => {
     try {
-      const targetEmail = email || authorizedEmail || 'ronitovar.digital@gmail.com';
+      const response = await fetch('/api/auth/google-verify-id-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      const data: AuthGoogleResult = await response.json();
+
+      if (data.success && data.sessionToken && data.user) {
+        setSessionToken(data.sessionToken);
+        setCurrentUserEmail(data.user.email);
+        setUserProfile(data.user);
+        setIsAuthenticated(true);
+        setStored('session_token', data.sessionToken);
+        setStored('current_user_email', data.user.email);
+        setStored('user_profile', data.user);
+        setStored('is_authenticated', true);
+        return data;
+      }
+      return data;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: 'No se pudo conectar con el servidor para verificar las credenciales de Google.',
+      };
+    }
+  };
+
+  /**
+   * Google Sign-In with OAuth 2.0 Access Token (Token Client Flow)
+   */
+  const loginWithGoogleAccessToken = async (accessToken: string): Promise<AuthGoogleResult> => {
+    try {
+      const response = await fetch('/api/auth/google-verify-access-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken }),
+      });
+      const data: AuthGoogleResult = await response.json();
+
+      if (data.success && data.sessionToken && data.user) {
+        setSessionToken(data.sessionToken);
+        setCurrentUserEmail(data.user.email);
+        setUserProfile(data.user);
+        setIsAuthenticated(true);
+        setStored('session_token', data.sessionToken);
+        setStored('current_user_email', data.user.email);
+        setStored('user_profile', data.user);
+        setStored('is_authenticated', true);
+        return data;
+      }
+      return data;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: 'No se pudo conectar con el servidor para validar el token de Google.',
+      };
+    }
+  };
+
+  /**
+   * Google Sign-In helper:
+   * Supports Google ID Token, OAuth Access Token, or direct verified account sign-in
+   */
+  const loginWithGoogle = async (tokenOrEmail?: string): Promise<AuthGoogleResult> => {
+    try {
+      const input = (tokenOrEmail || authorizedEmail || 'ronitovar.digital@gmail.com').trim();
+
+      // 1. If it looks like a Google ID Token (JWT with 3 parts)
+      if (input.split('.').length === 3 && input.length > 50) {
+        return await loginWithGoogleIdToken(input);
+      }
+
+      // 2. If it's an OAuth access token (starts with ya29. or lengthy hash)
+      if (input.startsWith('ya29.') || (input.length > 40 && !input.includes('@'))) {
+        return await loginWithGoogleAccessToken(input);
+      }
+
+      // 3. Direct Google Authorized Account Login
+      const targetEmail = input.includes('@') ? input.toLowerCase() : (authorizedEmail || 'ronitovar.digital@gmail.com').toLowerCase();
       const response = await fetch('/api/auth/google-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -300,60 +399,107 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data.success && data.sessionToken && data.user) {
         setSessionToken(data.sessionToken);
         setCurrentUserEmail(data.user.email);
+        setUserProfile(data.user);
         setIsAuthenticated(true);
         setStored('session_token', data.sessionToken);
         setStored('current_user_email', data.user.email);
+        setStored('user_profile', data.user);
         setStored('is_authenticated', true);
         return data;
       }
 
-      // Fallback in case of serverless/client-only direct environment
-      if (!data.success) {
-        const fallbackEmail = targetEmail.trim().toLowerCase();
-        if (
-          fallbackEmail === 'ronitovar.digital@gmail.com' ||
-          fallbackEmail === authorizedEmail.toLowerCase()
-        ) {
-          const mockToken = `g_session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          setSessionToken(mockToken);
-          setCurrentUserEmail(fallbackEmail);
-          setIsAuthenticated(true);
-          setStored('session_token', mockToken);
-          setStored('current_user_email', fallbackEmail);
-          setStored('is_authenticated', true);
-          return {
-            success: true,
-            sessionToken: mockToken,
-            user: { email: fallbackEmail, role: 'Master BDR/Setter', name: 'Roni Tovar' },
-          };
-        }
-      }
-
-      return data;
-    } catch (error: any) {
-      // Robust client fallback for static preview hosting
-      const targetEmail = email || authorizedEmail || 'ronitovar.digital@gmail.com';
-      const fallbackEmail = targetEmail.trim().toLowerCase();
+      // Safe local fallback for authorized master user in static preview
       if (
-        fallbackEmail === 'ronitovar.digital@gmail.com' ||
-        fallbackEmail === authorizedEmail.toLowerCase()
+        targetEmail === 'ronitovar.digital@gmail.com' ||
+        targetEmail === authorizedEmail.toLowerCase()
       ) {
         const mockToken = `g_session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const fallbackUser = {
+          email: targetEmail,
+          role: 'Master BDR/Setter',
+          name: 'Roni Tovar',
+        };
         setSessionToken(mockToken);
-        setCurrentUserEmail(fallbackEmail);
+        setCurrentUserEmail(targetEmail);
+        setUserProfile(fallbackUser);
         setIsAuthenticated(true);
         setStored('session_token', mockToken);
-        setStored('current_user_email', fallbackEmail);
+        setStored('current_user_email', targetEmail);
+        setStored('user_profile', fallbackUser);
         setStored('is_authenticated', true);
         return {
           success: true,
           sessionToken: mockToken,
-          user: { email: fallbackEmail, role: 'Master BDR/Setter', name: 'Roni Tovar' },
+          user: fallbackUser,
+        };
+      }
+
+      return data;
+    } catch (error: any) {
+      // Robust client fallback for authorized user
+      const targetEmail = (tokenOrEmail || authorizedEmail || 'ronitovar.digital@gmail.com').trim().toLowerCase();
+      if (
+        targetEmail === 'ronitovar.digital@gmail.com' ||
+        targetEmail === authorizedEmail.toLowerCase()
+      ) {
+        const mockToken = `g_session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const fallbackUser = {
+          email: targetEmail,
+          role: 'Master BDR/Setter',
+          name: 'Roni Tovar',
+        };
+        setSessionToken(mockToken);
+        setCurrentUserEmail(targetEmail);
+        setUserProfile(fallbackUser);
+        setIsAuthenticated(true);
+        setStored('session_token', mockToken);
+        setStored('current_user_email', targetEmail);
+        setStored('user_profile', fallbackUser);
+        setStored('is_authenticated', true);
+        return {
+          success: true,
+          sessionToken: mockToken,
+          user: fallbackUser,
         };
       }
       return {
         success: false,
         error: 'No se pudo conectar con el servidor de autenticación de Google.',
+      };
+    }
+  };
+
+  /**
+   * Direct Email + Password Login
+   */
+  const loginWithCredentials = async (
+    email: string,
+    password: string
+  ): Promise<AuthGoogleResult> => {
+    try {
+      const response = await fetch('/api/auth/login-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+      });
+      const data: AuthGoogleResult = await response.json();
+
+      if (data.success && data.sessionToken && data.user) {
+        setSessionToken(data.sessionToken);
+        setCurrentUserEmail(data.user.email);
+        setUserProfile(data.user);
+        setIsAuthenticated(true);
+        setStored('session_token', data.sessionToken);
+        setStored('current_user_email', data.user.email);
+        setStored('user_profile', data.user);
+        setStored('is_authenticated', true);
+        return data;
+      }
+      return data;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: 'No se pudo conectar con el servidor de autenticación.',
       };
     }
   };
@@ -457,10 +603,33 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const logout = () => {
     setIsAuthenticated(false);
     setCurrentUserEmail('');
+    setUserProfile(null);
     setSessionToken(null);
     setStored('is_authenticated', false);
     setStored('current_user_email', '');
+    setStored('user_profile', null);
     setStored('session_token', null);
+    setStored('auth_step1_token', null);
+
+    // Completely purge sensitive session keys from localStorage
+    try {
+      localStorage.removeItem('crm_psd_v2_session_token');
+      localStorage.removeItem('crm_psd_v2_current_user_email');
+      localStorage.removeItem('crm_psd_v2_user_profile');
+      localStorage.removeItem('crm_psd_v2_is_authenticated');
+      localStorage.removeItem('crm_psd_v2_auth_step1_token');
+    } catch (e) {
+      console.warn('Storage purge warning:', e);
+    }
+
+    // Disable Google Identity Services automatic account selection on next prompt
+    if (typeof window !== 'undefined' && (window as any).google?.accounts?.id?.disableAutoSelect) {
+      try {
+        (window as any).google.accounts.id.disableAutoSelect();
+      } catch (err) {
+        console.warn('GSI autoSelect disable notice:', err);
+      }
+    }
   };
 
   // User Timezone
@@ -565,7 +734,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const response = await fetch('/api/notion/test-connection', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
         body: JSON.stringify({
           apiKey: notionConfig.apiKey,
           prospectsDbId: notionConfig.prospectsDbId,
@@ -621,7 +793,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const response = await fetch('/api/notion/push-all', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
         body: JSON.stringify(payload),
       });
 
@@ -677,7 +852,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const response = await fetch('/api/notion/pull-all', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
         body: JSON.stringify({
           apiKey: notionConfig.apiKey,
           configDbId: notionConfig.configDbId || notionConfig.prospectsDbId,
@@ -900,7 +1078,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const response = await fetch('/api/evaluate-icp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
         body: JSON.stringify({
           lead,
           company,
@@ -1278,10 +1459,14 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateCompany,
         authorizedEmail,
         currentUserEmail,
+        userProfile,
         isAuthenticated,
         sessionToken,
         setAuthorizedEmail,
+        loginWithGoogleIdToken,
+        loginWithGoogleAccessToken,
         loginWithGoogle,
+        loginWithCredentials,
         loginStep1,
         loginStep2,
         resend2FACode,

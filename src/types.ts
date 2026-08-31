@@ -321,6 +321,7 @@ export interface AuthGoogleResult {
     email: string;
     role: string;
     name?: string;
+    picture?: string;
   };
   error?: string;
 }

@@ -9,7 +9,10 @@ import {
   verifySessionToken,
   changePassword,
   loadAuthVault,
+  verifyGoogleIdToken,
+  verifyGoogleAccessToken,
   authenticateWithGoogle,
+  authenticateWithCredentials,
 } from "./server/auth";
 import {
   testNotionConnection,
@@ -27,6 +30,27 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "10mb" }));
 
+// Middleware to guard protected API routes
+function requireAuthMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      error: "Acceso no autorizado. Se requiere sesión activa de Google autorizada.",
+    });
+  }
+  const token = authHeader.substring(7);
+  const session = verifySessionToken(token);
+  if (!session.valid) {
+    return res.status(401).json({
+      success: false,
+      error: "Sesión inválida o expirada. Inicia sesión nuevamente con tu cuenta de Google.",
+    });
+  }
+  (req as any).user = session.user;
+  next();
+}
+
 // Lazy initialize Gemini client
 let geminiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
@@ -43,21 +67,20 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiClient;
 }
 
-// Health check
+// Health check (Public)
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
     hasApiKey: !!process.env.GEMINI_API_KEY,
-    authorizedEmail: process.env.AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com",
     timestamp: new Date().toISOString(),
   });
 });
 
 // ==========================================
-// SECURE AUTHENTICATION API ENDPOINTS
+// SECURE GOOGLE OAUTH & AUTHENTICATION ENDPOINTS
 // ==========================================
 
-// Google Sign-In: Instant direct login with authorized Google Account
+// Google Sign-In: Direct authorized account authentication
 app.post("/api/auth/google-login", async (req, res) => {
   try {
     const { email } = req.body;
@@ -69,7 +92,43 @@ app.post("/api/auth/google-login", async (req, res) => {
   }
 });
 
-// Step 1: Verify Password (legacy fallback)
+// Credentials Login (Email + Password with secure hash validation)
+app.post("/api/auth/login-credentials", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const result = await authenticateWithCredentials(email, password);
+    return res.json(result);
+  } catch (error: any) {
+    console.error("Credentials Login error:", error);
+    return res.status(500).json({ success: false, error: "Error en el servidor al verificar credenciales." });
+  }
+});
+
+// Google Sign-In with ID Token (Google Identity Services GSI)
+app.post("/api/auth/google-verify-id-token", async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    const result = await verifyGoogleIdToken(idToken);
+    return res.json(result);
+  } catch (error: any) {
+    console.error("Google ID Token verification error:", error);
+    return res.status(500).json({ success: false, error: "Error en el servidor al verificar Google ID Token." });
+  }
+});
+
+// Google Sign-In with Access Token (OAuth 2.0 Token Client)
+app.post("/api/auth/google-verify-access-token", async (req, res) => {
+  try {
+    const { accessToken } = req.body;
+    const result = await verifyGoogleAccessToken(accessToken);
+    return res.json(result);
+  } catch (error: any) {
+    console.error("Google Access Token verification error:", error);
+    return res.status(500).json({ success: false, error: "Error en el servidor al verificar Google Access Token." });
+  }
+});
+
+// Step 1: Verify Password (administrative fallback)
 app.post("/api/auth/login-step1", async (req, res) => {
   try {
     const { password } = req.body;
@@ -117,28 +176,18 @@ app.post("/api/auth/verify-session", (req, res) => {
 });
 
 // Change Password (Authenticated only)
-app.post("/api/auth/change-password", async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ success: false, error: "No autorizado. Sesión requerida." });
-  }
-  const token = authHeader.substring(7);
-  const session = verifySessionToken(token);
-  if (!session.valid) {
-    return res.status(401).json({ success: false, error: "Sesión inválida o expirada. Vuelve a iniciar sesión." });
-  }
-
+app.post("/api/auth/change-password", requireAuthMiddleware, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const result = await changePassword(currentPassword, newPassword);
   return res.json(result);
 });
 
 // ==========================================
-// NOTION MULTI-DATABASE SYNC API ENDPOINTS
+// NOTION MULTI-DATABASE SYNC API ENDPOINTS (PROTECTED)
 // ==========================================
 
 // Test Notion Connection & DB Access
-app.post("/api/notion/test-connection", async (req, res) => {
+app.post("/api/notion/test-connection", requireAuthMiddleware, async (req, res) => {
   try {
     const { apiKey, prospectsDbId, companiesDbId, logsDbId, configDbId } = req.body || {};
     const result = await testNotionConnection(apiKey, {
@@ -155,7 +204,7 @@ app.post("/api/notion/test-connection", async (req, res) => {
 });
 
 // Push all CRM data (Prospects, Companies, Logs, WorkBlocks, Config) to Notion
-app.post("/api/notion/push-all", async (req, res) => {
+app.post("/api/notion/push-all", requireAuthMiddleware, async (req, res) => {
   try {
     const { apiKey, prospectsDbId, companiesDbId, logsDbId, configDbId, data } = req.body || {};
     if (!data) {
@@ -177,7 +226,7 @@ app.post("/api/notion/push-all", async (req, res) => {
 });
 
 // Pull CRM data from Notion
-app.post("/api/notion/pull-all", async (req, res) => {
+app.post("/api/notion/pull-all", requireAuthMiddleware, async (req, res) => {
   try {
     const { apiKey, configDbId, prospectsDbId, companiesDbId, logsDbId } = req.body || {};
     const result = await pullDataFromNotion({
@@ -243,7 +292,7 @@ async function generateContentWithFallback(
  * El resultado devuelto se persiste en la entidad Lead como caché explícita
  * y no se recalcula automáticamente hasta que el usuario vuelva a presionar el botón de evaluación.
  */
-app.post("/api/evaluate-icp", async (req, res) => {
+app.post("/api/evaluate-icp", requireAuthMiddleware, async (req, res) => {
   try {
     const { lead, company, interactions } = req.body;
 
@@ -417,7 +466,7 @@ Analiza la correspondencia del prospecto con el ICP y devuelve el JSON con score
 });
 
 // Chat Endpoint: Resource Assistant
-app.post("/api/chat/resource", async (req, res) => {
+app.post("/api/chat/resource", requireAuthMiddleware, async (req, res) => {
   try {
     const { message, leadContext, companyResources, notebookContext, history } = req.body;
 
@@ -480,7 +529,7 @@ Dado el estado del prospecto (${leadContext?.name || "el prospecto"} - Semáforo
 });
 
 // Chat Endpoint: BDR Coach Playbook
-app.post("/api/chat/coach", async (req, res) => {
+app.post("/api/chat/coach", requireAuthMiddleware, async (req, res) => {
   try {
     const { message, notebookContext, history, activeCompany } = req.body;
 
@@ -533,7 +582,7 @@ Para esta situación, aplica el **Framework del Semáforo y Desarme de Objeción
 });
 
 // Propose Notebook update from Feedback IA
-app.post("/api/propose-notebook-update", async (req, res) => {
+app.post("/api/propose-notebook-update", requireAuthMiddleware, async (req, res) => {
   const { notebookType, currentNotebook = "", feedbackItems } = req.body || {};
   try {
     const ai = getGeminiClient();

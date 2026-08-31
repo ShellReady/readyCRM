@@ -592,14 +592,182 @@ export async function changePassword(
 }
 
 /**
- * Authenticate directly via Google Account (No password or 2FA code needed)
+ * Verify Google ID Token (from Google Identity Services GSI) with Google API
+ */
+export async function verifyGoogleIdToken(
+  idToken: string
+): Promise<{
+  success: boolean;
+  sessionToken?: string;
+  user?: { email: string; role: string; name?: string; picture?: string };
+  error?: string;
+}> {
+  if (!idToken || typeof idToken !== "string") {
+    return { success: false, error: "Token de Google ID no proporcionado." };
+  }
+
+  try {
+    const response = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken.trim())}`
+    );
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: "El token de Google es inválido o ha expirado. Por favor intenta iniciar sesión de nuevo.",
+      };
+    }
+
+    const payload = await response.json();
+    const tokenEmail = (payload.email || "").trim().toLowerCase();
+    const emailVerified =
+      payload.email_verified === true || payload.email_verified === "true";
+
+    if (!tokenEmail || !emailVerified) {
+      return {
+        success: false,
+        error: "La cuenta de Google no tiene un correo electrónico verificado.",
+      };
+    }
+
+    const authorized = (process.env.AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com")
+      .trim()
+      .toLowerCase();
+
+    if (tokenEmail !== authorized && tokenEmail !== "ronitovar.digital@gmail.com") {
+      console.warn(`[AUTH] ⚠️ Intento de acceso no autorizado con Google: ${tokenEmail}`);
+      return {
+        success: false,
+        error: `Acceso denegado: La cuenta de Google (${tokenEmail}) no está autorizada. Este CRM es privado y de uso exclusivo.`,
+      };
+    }
+
+    // Generate 7-day signed session token
+    const sessionToken = signToken({
+      email: tokenEmail,
+      role: "Master BDR/Setter (Google Auth)",
+      name: payload.name || "Roni Tovar",
+      picture: payload.picture,
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      sessionNonce: crypto.randomBytes(12).toString("hex"),
+    });
+
+    console.log(`[AUTH] 🚀 Acceso con Google ID Token exitoso y verificado para: ${tokenEmail}`);
+
+    return {
+      success: true,
+      sessionToken,
+      user: {
+        email: tokenEmail,
+        role: "Master BDR/Setter",
+        name: payload.name || "Roni Tovar",
+        picture: payload.picture,
+      },
+    };
+  } catch (err: any) {
+    console.error("Error verifying Google ID token with Google API:", err);
+    return {
+      success: false,
+      error: "Error de comunicación con los servidores de autenticación de Google.",
+    };
+  }
+}
+
+/**
+ * Verify Google OAuth 2.0 Access Token with Google UserInfo API
+ */
+export async function verifyGoogleAccessToken(
+  accessToken: string
+): Promise<{
+  success: boolean;
+  sessionToken?: string;
+  user?: { email: string; role: string; name?: string; picture?: string };
+  error?: string;
+}> {
+  if (!accessToken || typeof accessToken !== "string") {
+    return { success: false, error: "Access Token de Google no proporcionado." };
+  }
+
+  try {
+    const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: {
+        Authorization: `Bearer ${accessToken.trim()}`,
+      },
+    });
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: "Token de acceso de Google inválido o expirado.",
+      };
+    }
+
+    const payload = await response.json();
+    const tokenEmail = (payload.email || "").trim().toLowerCase();
+    const emailVerified =
+      payload.email_verified === true || payload.email_verified === "true";
+
+    if (!tokenEmail || !emailVerified) {
+      return {
+        success: false,
+        error: "No se pudo verificar el correo de la cuenta de Google.",
+      };
+    }
+
+    const authorized = (process.env.AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com")
+      .trim()
+      .toLowerCase();
+
+    if (tokenEmail !== authorized && tokenEmail !== "ronitovar.digital@gmail.com") {
+      console.warn(`[AUTH] ⚠️ Intento de acceso no autorizado con Google OAuth: ${tokenEmail}`);
+      return {
+        success: false,
+        error: `Acceso denegado: La cuenta de Google (${tokenEmail}) no está autorizada. Este CRM es privado y de uso exclusivo.`,
+      };
+    }
+
+    // Generate 7-day signed session token
+    const sessionToken = signToken({
+      email: tokenEmail,
+      role: "Master BDR/Setter (Google Auth)",
+      name: payload.name || "Roni Tovar",
+      picture: payload.picture,
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      sessionNonce: crypto.randomBytes(12).toString("hex"),
+    });
+
+    console.log(`[AUTH] 🚀 Acceso con Google Access Token exitoso y verificado para: ${tokenEmail}`);
+
+    return {
+      success: true,
+      sessionToken,
+      user: {
+        email: tokenEmail,
+        role: "Master BDR/Setter",
+        name: payload.name || "Roni Tovar",
+        picture: payload.picture,
+      },
+    };
+  } catch (err: any) {
+    console.error("Error verifying Google Access Token:", err);
+    return {
+      success: false,
+      error: "Error de comunicación con Google UserInfo API.",
+    };
+  }
+}
+
+/**
+ * Direct Instant Sign-in with authorized Google Account
  */
 export async function authenticateWithGoogle(
   providedEmail?: string
 ): Promise<{
   success: boolean;
   sessionToken?: string;
-  user?: { email: string; role: string; name?: string };
+  user?: { email: string; role: string; name?: string; picture?: string };
   error?: string;
 }> {
   const targetEmail = (providedEmail || AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com")
@@ -613,7 +781,7 @@ export async function authenticateWithGoogle(
   if (targetEmail !== authorized && targetEmail !== "ronitovar.digital@gmail.com") {
     return {
       success: false,
-      error: `La cuenta de Google (${targetEmail}) no está autorizada. Acceso exclusivo para ${authorized}.`,
+      error: "Acceso denegado: La cuenta de Google no está autorizada. Este CRM es privado y de uso exclusivo.",
     };
   }
 
@@ -621,6 +789,7 @@ export async function authenticateWithGoogle(
   const sessionToken = signToken({
     email: targetEmail,
     role: "Master BDR/Setter (Google Auth)",
+    name: "Roni Tovar",
     issuedAt: Date.now(),
     expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
     sessionNonce: crypto.randomBytes(12).toString("hex"),
@@ -633,6 +802,76 @@ export async function authenticateWithGoogle(
     sessionToken,
     user: {
       email: targetEmail,
+      role: "Master BDR/Setter",
+      name: "Roni Tovar",
+    },
+  };
+}
+
+/**
+ * Direct Email + Password Login with Vault verification
+ */
+export async function authenticateWithCredentials(
+  emailInput: string,
+  passwordInput: string
+): Promise<{
+  success: boolean;
+  sessionToken?: string;
+  user?: { email: string; role: string; name?: string };
+  error?: string;
+}> {
+  if (!emailInput || !passwordInput) {
+    return {
+      success: false,
+      error: "Por favor ingresa tu correo electrónico y tu contraseña.",
+    };
+  }
+
+  const normalizedEmail = emailInput.trim().toLowerCase();
+  const authorized = (process.env.AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com")
+    .trim()
+    .toLowerCase();
+
+  // Validate authorized user account
+  if (normalizedEmail !== authorized && normalizedEmail !== "ronitovar.digital@gmail.com") {
+    return {
+      success: false,
+      error: "Credenciales inválidas. Por favor verifica tus datos de acceso.",
+    };
+  }
+
+  const vault = loadAuthVault();
+  const isPasswordValid = verifyPasswordHash(
+    passwordInput,
+    vault.passwordHash,
+    vault.salt,
+    vault.iterations
+  );
+
+  if (!isPasswordValid) {
+    return {
+      success: false,
+      error: "Contraseña incorrecta. Por favor intenta nuevamente.",
+    };
+  }
+
+  // Generate 7-day session token
+  const sessionToken = signToken({
+    email: normalizedEmail,
+    role: "Master BDR/Setter",
+    name: "Roni Tovar",
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    sessionNonce: crypto.randomBytes(12).toString("hex"),
+  });
+
+  console.log(`[AUTH] 🔑 Acceso por correo y contraseña exitoso para: ${normalizedEmail}`);
+
+  return {
+    success: true,
+    sessionToken,
+    user: {
+      email: normalizedEmail,
       role: "Master BDR/Setter",
       name: "Roni Tovar",
     },
