@@ -761,6 +761,8 @@ export async function verifyGoogleAccessToken(
 
 /**
  * Direct Instant Sign-in with authorized Google Account
+ * NOTE: For security, unverified login requests are rejected. 
+ * Real Google Tokens must be verified via verifyGoogleIdToken or verifyGoogleAccessToken.
  */
 export async function authenticateWithGoogle(
   providedEmail?: string
@@ -770,41 +772,9 @@ export async function authenticateWithGoogle(
   user?: { email: string; role: string; name?: string; picture?: string };
   error?: string;
 }> {
-  const targetEmail = (providedEmail || AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com")
-    .trim()
-    .toLowerCase();
-  const authorized = (process.env.AUTHORIZED_EMAIL || "ronitovar.digital@gmail.com")
-    .trim()
-    .toLowerCase();
-
-  // Ensure authorized Google account match
-  if (targetEmail !== authorized && targetEmail !== "ronitovar.digital@gmail.com") {
-    return {
-      success: false,
-      error: "Acceso denegado: La cuenta de Google no está autorizada. Este CRM es privado y de uso exclusivo.",
-    };
-  }
-
-  // Generate 7-day signed session token
-  const sessionToken = signToken({
-    email: targetEmail,
-    role: "Master BDR/Setter (Google Auth)",
-    name: "Roni Tovar",
-    issuedAt: Date.now(),
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
-    sessionNonce: crypto.randomBytes(12).toString("hex"),
-  });
-
-  console.log(`[AUTH] 🚀 Acceso con Cuenta de Google exitoso para: ${targetEmail}`);
-
   return {
-    success: true,
-    sessionToken,
-    user: {
-      email: targetEmail,
-      role: "Master BDR/Setter",
-      name: "Roni Tovar",
-    },
+    success: false,
+    error: "Por seguridad, para acceder con Google debes validar tu cuenta mediante el selector oficial o usar tu contraseña en la pestaña 'Contraseña'.",
   };
 }
 

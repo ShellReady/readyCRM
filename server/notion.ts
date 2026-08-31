@@ -99,6 +99,287 @@ function extractDate(prop: any): string {
   return "";
 }
 
+function extractCheckbox(prop: any): boolean {
+  if (!prop) return false;
+  if (prop.type === "checkbox") return Boolean(prop.checkbox);
+  if (prop.type === "select") {
+    const val = (prop.select?.name || "").toLowerCase();
+    return val === "archivado" || val === "true" || val === "sí" || val === "si";
+  }
+  return false;
+}
+
+/**
+ * Saves or updates a single lead directly to Notion's Prospects Database.
+ * If lead.notionPageId (or valid UUID) exists, it attempts a PATCH. Otherwise, it creates a new page.
+ */
+export async function saveLeadToNotion(payload: {
+  apiKey?: string;
+  prospectsDbId?: string;
+  lead: any;
+  companies?: any[];
+}): Promise<{
+  success: boolean;
+  notionPageId?: string;
+  last_edited_time?: string;
+  error?: string;
+}> {
+  const token = (payload.apiKey || process.env.NOTION_API_KEY || "").trim();
+  if (!token) {
+    return { success: false, error: "Falta el Token de Notion." };
+  }
+
+  const prospectsDb = cleanNotionId(payload.prospectsDbId || process.env.NOTION_PROSPECTS_DB_ID);
+  if (!prospectsDb) {
+    return { success: false, error: "Falta el ID de la base de datos de Prospectos en Notion." };
+  }
+
+  const lead = payload.lead;
+  const companies = payload.companies || [];
+  const getCompanyName = (companyId?: string) => {
+    if (!companyId) return "General";
+    const found = companies.find((c: any) => c.id === companyId);
+    return found ? found.name : companyId;
+  };
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Notion-Version": "2022-06-28",
+    "Content-Type": "application/json",
+  };
+
+  const properties: any = {
+    "Nombre Completo": {
+      title: [{ text: { content: lead.name || "Prospecto Sin Nombre" } }],
+    },
+    "Cargo / Rol": {
+      rich_text: [{ text: { content: lead.position || "Decision Maker" } }],
+    },
+    "Empresa": {
+      rich_text: [{ text: { content: lead.companyContact || getCompanyName(lead.companyId) } }],
+    },
+    "Semáforo ICP": {
+      rich_text: [{ text: { content: lead.semaforo || "Amarillo" } }],
+    },
+    "Score ICP (0-10)": {
+      number: typeof lead.icpScore === "number" ? Math.min(10, Math.max(0, Math.round(lead.icpScore / 10))) : 7,
+    },
+    "Etapa Funnel": {
+      rich_text: [{ text: { content: lead.stage || "Identificado" } }],
+    },
+    "Canal de Prospección": {
+      rich_text: [{ text: { content: lead.channel || "LinkedIn" } }],
+    },
+    "Valor Estimado (USD)": {
+      number: Number(lead.estimatedValue || lead.dealValue || 0),
+    },
+    "Objeciones Principales": {
+      rich_text: [{ text: { content: (lead.semaforoDescription || lead.notes || "").slice(0, 1900) } }],
+    },
+    "Notas de Calificación": {
+      rich_text: [{ text: { content: (lead.summary || lead.qualificationNotes || "").slice(0, 1900) } }],
+    },
+    "Siguiente Paso": {
+      rich_text: [{ text: { content: lead.nextAction || "Contactar por mensaje inicial" } }],
+    },
+    "Estado Archivado": {
+      rich_text: [{ text: { content: lead.isArchived ? `Archivado (${lead.archivedReason || lead.stage || "Cerrado"})` : "Activo" } }],
+    },
+  };
+
+  const validEmail = safeEmail(lead.email);
+  if (validEmail) properties["Email Corporativo"] = { email: validEmail };
+
+  if (lead.phone) {
+    properties["Teléfono / WhatsApp"] = {
+      rich_text: [{ text: { content: String(lead.phone) } }],
+    };
+  }
+
+  const validLinkedin = safeUrl(lead.linkedin);
+  if (validLinkedin) properties["Perfil LinkedIn"] = { url: validLinkedin };
+
+  const validLastContact = safeDate(lead.summaryUpdatedAt || lead.createdAt || new Date().toISOString());
+  if (validLastContact) properties["Fecha Último Contacto"] = { date: validLastContact };
+
+  const validFollowUp = safeDate(lead.followUpDate);
+  if (validFollowUp) properties["Fecha Próximo Seguimiento"] = { date: validFollowUp };
+
+  if (lead.timezone) {
+    properties["Zona Horaria"] = { rich_text: [{ text: { content: lead.timezone } }] };
+  }
+
+  const targetPageId = lead.notionPageId || (lead.id && lead.id.length >= 32 ? lead.id : null);
+
+  // If page already exists in Notion, update it with PATCH
+  if (targetPageId) {
+    try {
+      const updateRes = await fetch(`https://api.notion.com/v1/pages/${targetPageId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ properties }),
+      });
+
+      if (updateRes.ok) {
+        const updateData: any = await updateRes.json();
+        return {
+          success: true,
+          notionPageId: updateData.id,
+          last_edited_time: updateData.last_edited_time,
+        };
+      }
+    } catch (e: any) {
+      console.warn("[NOTION] Error patching lead page:", e.message);
+    }
+  }
+
+  // Otherwise, create new page in Notion database
+  try {
+    const createRes = await fetch("https://api.notion.com/v1/pages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        parent: { database_id: prospectsDb },
+        properties,
+      }),
+    });
+
+    if (!createRes.ok) {
+      const errJson: any = await createRes.json().catch(() => ({}));
+      return {
+        success: false,
+        error: `Error de Notion (${createRes.status}): ${errJson.message || createRes.statusText}`,
+      };
+    }
+
+    const createData: any = await createRes.json();
+    return {
+      success: true,
+      notionPageId: createData.id,
+      last_edited_time: createData.last_edited_time,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || "Error al crear página en Notion",
+    };
+  }
+}
+
+/**
+ * Deletes a record/page in Notion in ONE direction by setting archived: true (moving to Notion trash).
+ */
+export async function deletePageInNotion(payload: {
+  apiKey?: string;
+  pageId: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const token = (payload.apiKey || process.env.NOTION_API_KEY || "").trim();
+  if (!token) {
+    return { success: false, error: "Falta el Token de Notion." };
+  }
+  if (!payload.pageId) {
+    return { success: false, error: "Falta el ID de la página a eliminar en Notion." };
+  }
+
+  try {
+    const cleanId = cleanNotionId(payload.pageId);
+    const res = await fetch(`https://api.notion.com/v1/pages/${cleanId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        archived: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const errJson: any = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        error: `Error al archivar/eliminar página en Notion: ${errJson.message || res.statusText}`,
+      };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || "Error al eliminar en Notion.",
+    };
+  }
+}
+
+/**
+ * Checks for external updates in Notion database comparing last_edited_time
+ */
+export async function checkNotionUpdates(payload: {
+  apiKey?: string;
+  prospectsDbId?: string;
+  lastCheckedTime?: string;
+}): Promise<{
+  success: boolean;
+  hasUpdates: boolean;
+  latestEditedTime?: string;
+  updatedPagesCount?: number;
+  error?: string;
+}> {
+  const token = (payload.apiKey || process.env.NOTION_API_KEY || "").trim();
+  if (!token) {
+    return { success: false, hasUpdates: false, error: "Falta Token Notion" };
+  }
+  const prospectsDb = cleanNotionId(payload.prospectsDbId || process.env.NOTION_PROSPECTS_DB_ID);
+  if (!prospectsDb) {
+    return { success: false, hasUpdates: false, error: "Falta prospectsDbId" };
+  }
+
+  try {
+    const queryRes = await fetch(`https://api.notion.com/v1/databases/${prospectsDb}/query`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        page_size: 10,
+        sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
+      }),
+    });
+
+    if (!queryRes.ok) {
+      return { success: false, hasUpdates: false };
+    }
+
+    const data: any = await queryRes.json();
+    const results = data.results || [];
+    if (results.length === 0) {
+      return { success: true, hasUpdates: false };
+    }
+
+    const latestEditedTime = results[0]?.last_edited_time;
+    if (!payload.lastCheckedTime) {
+      return { success: true, hasUpdates: true, latestEditedTime, updatedPagesCount: results.length };
+    }
+
+    const lastChecked = new Date(payload.lastCheckedTime).getTime();
+    const latest = new Date(latestEditedTime).getTime();
+    const hasUpdates = latest > lastChecked;
+    const updatedPages = results.filter((p: any) => new Date(p.last_edited_time).getTime() > lastChecked);
+
+    return {
+      success: true,
+      hasUpdates,
+      latestEditedTime,
+      updatedPagesCount: updatedPages.length,
+    };
+  } catch (error: any) {
+    return { success: false, hasUpdates: false, error: error.message };
+  }
+}
+
 /**
  * Tests Notion API key and validates individual database access
  */
@@ -761,9 +1042,20 @@ export async function pullDataFromNotion(payload: {
               const nextAction = extractPlainText(p["Siguiente Paso"]) || "Seguimiento agendado";
               const lastContact = extractDate(p["Fecha Último Contacto"]) || timestamp;
               const followUp = extractDate(p["Fecha Próximo Seguimiento"]) || timestamp;
+              const estadoArchivadoRaw = extractPlainText(p["Estado Archivado"]) || extractPlainText(p["Archivado"]);
+              const isArchived =
+                estadoArchivadoRaw.toLowerCase().includes("archivado") ||
+                extractCheckbox(p["Archivado"]);
+              const archivedReason = estadoArchivadoRaw.includes("(")
+                ? estadoArchivadoRaw.replace(/^.*\((.*)\).*$/, "$1")
+                : isArchived
+                ? stage
+                : undefined;
 
               return {
                 id: page.id || `lead-${idx + 1}`,
+                notionPageId: page.id,
+                notionLastEditedTime: page.last_edited_time,
                 name,
                 companyContact: company,
                 position,
@@ -776,6 +1068,7 @@ export async function pullDataFromNotion(payload: {
                 icpScore,
                 icpJustification: "Sincronizado desde base de datos de Notion.",
                 icpLastEvaluated: lastContact,
+                icpScoreStatus: "Confirmado por usuario" as const,
                 temperature: icpScore >= 80 ? "Caliente" : icpScore >= 60 ? "Tibio" : "Frío",
                 semaforo,
                 semaforoDescription,
@@ -785,6 +1078,9 @@ export async function pullDataFromNotion(payload: {
                 summaryUpdatedAt: lastContact,
                 followUpDate: followUp,
                 createdAt: page.created_time || timestamp,
+                isArchived: Boolean(isArchived),
+                archivedAt: isArchived ? page.last_edited_time || timestamp : undefined,
+                archivedReason,
               };
             });
 

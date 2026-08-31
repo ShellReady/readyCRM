@@ -94,6 +94,8 @@ interface CRMContextType {
   syncPullFromNotion: () => Promise<NotionSyncResult>;
   isSyncingNotion: boolean;
   notionSyncFeedback: string | null;
+  lastNotionCheckTime: string | null;
+  checkForNotionEdits: () => Promise<boolean>;
 
   // Leads
   leads: Lead[];
@@ -101,6 +103,12 @@ interface CRMContextType {
   addLead: (lead: Omit<Lead, 'id' | 'createdAt'>) => Lead;
   updateLead: (id: string, updates: Partial<Lead>) => void;
   deleteLead: (id: string) => void;
+  archiveLead: (leadId: string, reason?: string) => Promise<void>;
+  unarchiveLead: (leadId: string) => Promise<void>;
+  saveLeadDirectToNotion: (lead: Lead) => Promise<void>;
+  pendingArchivalSuggestion: { lead: Lead; suggestedStage: string } | null;
+  dismissArchivalSuggestion: () => void;
+  confirmArchivalSuggestion: (archive: boolean) => Promise<void>;
   checkCrossCompanyConflict: (email: string, linkedin?: string, currentLeadId?: string) => ConflictWarning;
   evaluateLeadICP: (leadId: string) => Promise<{ score: number; justification: string; evaluatedAt: string }>;
   confirmLeadICPScore: (leadId: string, customScore?: number, customJustification?: string) => void;
@@ -125,6 +133,7 @@ interface CRMContextType {
   commissions: Commission[];
   filteredCommissions: Commission[];
   addCommission: (commission: Omit<Commission, 'id'>) => Commission;
+  updateCommission: (id: string, updates: Partial<Commission>) => void;
   updateCommissionStatus: (id: string, status: Commission['status']) => void;
   calculateCommissionAmount: (comm: Commission) => number;
 
@@ -371,100 +380,37 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   /**
    * Google Sign-In helper:
-   * Supports Google ID Token, OAuth Access Token, or direct verified account sign-in
+   * Supports Google ID Token or OAuth Access Token with strict server validation.
    */
-  const loginWithGoogle = async (tokenOrEmail?: string): Promise<AuthGoogleResult> => {
-    try {
-      const input = (tokenOrEmail || authorizedEmail || 'ronitovar.digital@gmail.com').trim();
+  const loginWithGoogle = async (token?: string): Promise<AuthGoogleResult> => {
+    if (!token || typeof token !== 'string' || !token.trim()) {
+      return {
+        success: false,
+        error: 'No se recibió un token de Google válido. Por favor selecciona tu cuenta en la ventana emergente.',
+      };
+    }
 
-      // 1. If it looks like a Google ID Token (JWT with 3 parts)
+    try {
+      const input = token.trim();
+
+      // 1. If it's a Google ID Token (JWT with 3 parts)
       if (input.split('.').length === 3 && input.length > 50) {
         return await loginWithGoogleIdToken(input);
       }
 
-      // 2. If it's an OAuth access token (starts with ya29. or lengthy hash)
-      if (input.startsWith('ya29.') || (input.length > 40 && !input.includes('@'))) {
+      // 2. If it's an OAuth access token (starts with ya29. or standard OAuth token)
+      if (input.startsWith('ya29.') || input.length > 30) {
         return await loginWithGoogleAccessToken(input);
       }
 
-      // 3. Direct Google Authorized Account Login
-      const targetEmail = input.includes('@') ? input.toLowerCase() : (authorizedEmail || 'ronitovar.digital@gmail.com').toLowerCase();
-      const response = await fetch('/api/auth/google-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: targetEmail }),
-      });
-      const data: AuthGoogleResult = await response.json();
-
-      if (data.success && data.sessionToken && data.user) {
-        setSessionToken(data.sessionToken);
-        setCurrentUserEmail(data.user.email);
-        setUserProfile(data.user);
-        setIsAuthenticated(true);
-        setStored('session_token', data.sessionToken);
-        setStored('current_user_email', data.user.email);
-        setStored('user_profile', data.user);
-        setStored('is_authenticated', true);
-        return data;
-      }
-
-      // Safe local fallback for authorized master user in static preview
-      if (
-        targetEmail === 'ronitovar.digital@gmail.com' ||
-        targetEmail === authorizedEmail.toLowerCase()
-      ) {
-        const mockToken = `g_session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const fallbackUser = {
-          email: targetEmail,
-          role: 'Master BDR/Setter',
-          name: 'Roni Tovar',
-        };
-        setSessionToken(mockToken);
-        setCurrentUserEmail(targetEmail);
-        setUserProfile(fallbackUser);
-        setIsAuthenticated(true);
-        setStored('session_token', mockToken);
-        setStored('current_user_email', targetEmail);
-        setStored('user_profile', fallbackUser);
-        setStored('is_authenticated', true);
-        return {
-          success: true,
-          sessionToken: mockToken,
-          user: fallbackUser,
-        };
-      }
-
-      return data;
-    } catch (error: any) {
-      // Robust client fallback for authorized user
-      const targetEmail = (tokenOrEmail || authorizedEmail || 'ronitovar.digital@gmail.com').trim().toLowerCase();
-      if (
-        targetEmail === 'ronitovar.digital@gmail.com' ||
-        targetEmail === authorizedEmail.toLowerCase()
-      ) {
-        const mockToken = `g_session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const fallbackUser = {
-          email: targetEmail,
-          role: 'Master BDR/Setter',
-          name: 'Roni Tovar',
-        };
-        setSessionToken(mockToken);
-        setCurrentUserEmail(targetEmail);
-        setUserProfile(fallbackUser);
-        setIsAuthenticated(true);
-        setStored('session_token', mockToken);
-        setStored('current_user_email', targetEmail);
-        setStored('user_profile', fallbackUser);
-        setStored('is_authenticated', true);
-        return {
-          success: true,
-          sessionToken: mockToken,
-          user: fallbackUser,
-        };
-      }
       return {
         success: false,
-        error: 'No se pudo conectar con el servidor de autenticación de Google.',
+        error: 'Formato de token de Google no reconocido.',
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: 'No se pudo conectar con el servidor de autenticación.',
       };
     }
   };
@@ -650,7 +596,13 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getStored('selected_company', 'all')
   );
 
-  const [leads, setLeads] = useState<Lead[]>(() => getStored('leads', INITIAL_LEADS));
+  const [leads, setLeads] = useState<Lead[]>(() => {
+    const stored = getStored<Lead[]>('leads', INITIAL_LEADS);
+    if (Array.isArray(stored) && stored.length === 9 && stored.every((l) => l.id.startsWith('lead-'))) {
+      return INITIAL_LEADS;
+    }
+    return stored;
+  });
   const [interactions, setInteractions] = useState<Interaction[]>(() =>
     getStored('interactions', INITIAL_INTERACTIONS)
   );
@@ -715,10 +667,123 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [isSyncingNotion, setIsSyncingNotion] = useState<boolean>(false);
   const [notionSyncFeedback, setNotionSyncFeedback] = useState<string | null>(null);
+  const [lastNotionCheckTime, setLastNotionCheckTime] = useState<string | null>(() =>
+    getStored('last_notion_check_time', null)
+  );
+  useEffect(() => setStored('last_notion_check_time', lastNotionCheckTime), [lastNotionCheckTime]);
+
+  const [pendingArchivalSuggestion, setPendingArchivalSuggestion] = useState<{
+    lead: Lead;
+    suggestedStage: string;
+  } | null>(null);
 
   const updateNotionConfig = (updates: Partial<NotionConfig>) => {
     setNotionConfig((prev) => ({ ...prev, ...updates }));
   };
+
+  /**
+   * Directly saves or updates a single lead in Notion's Database
+   */
+  const saveLeadDirectToNotion = async (leadToSave: Lead): Promise<void> => {
+    if (!notionConfig.apiKey || !notionConfig.prospectsDbId) return;
+    try {
+      const response = await fetch('/api/notion/save-lead', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
+        body: JSON.stringify({
+          apiKey: notionConfig.apiKey,
+          prospectsDbId: notionConfig.prospectsDbId,
+          lead: leadToSave,
+          companies,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.notionPageId) {
+          setLeads((prev) =>
+            prev.map((l) =>
+              l.id === leadToSave.id
+                ? {
+                    ...l,
+                    notionPageId: result.notionPageId,
+                    notionLastEditedTime: result.last_edited_time,
+                  }
+                : l
+            )
+          );
+        }
+      }
+    } catch (e) {
+      console.warn('Direct Notion save warning:', e);
+    }
+  };
+
+  /**
+   * Check for external edits made directly in Notion
+   */
+  const checkForNotionEdits = async (): Promise<boolean> => {
+    if (!notionConfig.apiKey || !notionConfig.prospectsDbId) return false;
+    try {
+      const response = await fetch('/api/notion/check-updates', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
+        body: JSON.stringify({
+          apiKey: notionConfig.apiKey,
+          prospectsDbId: notionConfig.prospectsDbId,
+          lastCheckedTime: lastNotionCheckTime,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.hasUpdates) {
+          // Fresh edits detected in Notion; pull seamlessly
+          await syncPullFromNotion();
+          setLastNotionCheckTime(result.latestEditedTime || new Date().toISOString());
+          return true;
+        } else if (result.success && result.latestEditedTime) {
+          setLastNotionCheckTime(result.latestEditedTime);
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  // Background auto-refresh on window focus & visibility change (Multi-device freshness)
+  useEffect(() => {
+    let timeoutId: any = null;
+    const handleCheck = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (!isSyncingNotion && notionConfig.apiKey && notionConfig.prospectsDbId) {
+          checkForNotionEdits();
+        }
+      }, 1200);
+    };
+
+    window.addEventListener('focus', handleCheck);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleCheck();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('focus', handleCheck);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearTimeout(timeoutId);
+    };
+  }, [notionConfig.apiKey, notionConfig.prospectsDbId, isSyncingNotion, lastNotionCheckTime]);
 
   /**
    * Test connection with Notion API and check database access
@@ -1037,27 +1102,111 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: 'lead-' + Date.now(),
       createdAt: new Date().toISOString().split('T')[0],
       summaryUpdatedAt: new Date().toISOString().split('T')[0],
+      isArchived: false,
     };
     setLeads((prev) => [newLead, ...prev]);
+
+    // Atomic direct save to Notion in the background
+    saveLeadDirectToNotion(newLead);
     return newLead;
   };
 
   const updateLead = (id: string, updates: Partial<Lead>) => {
-    setLeads((prev) =>
-      prev.map((l) =>
-        l.id === id
-          ? {
-              ...l,
-              ...updates,
-              summaryUpdatedAt: updates.summary ? new Date().toISOString().split('T')[0] : l.summaryUpdatedAt,
-            }
-          : l
-      )
-    );
+    const existing = leads.find((l) => l.id === id);
+    if (!existing) return;
+
+    const updatedLead: Lead = {
+      ...existing,
+      ...updates,
+      summaryUpdatedAt: updates.summary ? new Date().toISOString().split('T')[0] : existing.summaryUpdatedAt,
+    };
+
+    setLeads((prev) => prev.map((l) => (l.id === id ? updatedLead : l)));
+
+    // Check if transition to closed stage triggers archive suggestion
+    if (
+      updates.stage &&
+      (updates.stage === 'Cerrado Ganado' || updates.stage === 'Cerrado Perdido') &&
+      !existing.isArchived &&
+      !updates.isArchived
+    ) {
+      setPendingArchivalSuggestion({
+        lead: updatedLead,
+        suggestedStage: updates.stage,
+      });
+    }
+
+    // Atomic direct save to Notion in the background
+    saveLeadDirectToNotion(updatedLead);
   };
 
   const deleteLead = (id: string) => {
+    const targetLead = leads.find((l) => l.id === id);
     setLeads((prev) => prev.filter((l) => l.id !== id));
+
+    // One-way deletion in Notion (archived = true)
+    if (targetLead) {
+      const pageId = targetLead.notionPageId || (targetLead.id && targetLead.id.length >= 30 ? targetLead.id : null);
+      if (pageId && notionConfig.apiKey) {
+        fetch('/api/notion/delete-page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+          },
+          body: JSON.stringify({
+            apiKey: notionConfig.apiKey,
+            pageId,
+          }),
+        }).catch((e) => console.warn('Notion one-way delete notice:', e));
+      }
+    }
+  };
+
+  const archiveLead = async (leadId: string, reason?: string) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (!lead) return;
+
+    const archivedAt = new Date().toISOString();
+    const archivedReason = reason || lead.stage || 'Cerrado';
+    const updatedLead: Lead = {
+      ...lead,
+      isArchived: true,
+      archivedAt,
+      archivedReason,
+    };
+
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? updatedLead : l)));
+    await saveLeadDirectToNotion(updatedLead);
+  };
+
+  const unarchiveLead = async (leadId: string) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (!lead) return;
+
+    const updatedLead: Lead = {
+      ...lead,
+      isArchived: false,
+      archivedAt: undefined,
+      archivedReason: undefined,
+    };
+
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? updatedLead : l)));
+    await saveLeadDirectToNotion(updatedLead);
+  };
+
+  const dismissArchivalSuggestion = () => {
+    setPendingArchivalSuggestion(null);
+  };
+
+  const confirmArchivalSuggestion = async (archive: boolean) => {
+    if (!pendingArchivalSuggestion) return;
+    const { lead, suggestedStage } = pendingArchivalSuggestion;
+    setPendingArchivalSuggestion(null);
+
+    if (archive) {
+      await archiveLead(lead.id, suggestedStage);
+    }
   };
 
   /**
@@ -1181,7 +1330,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Commissions Formula & Management
   const calculateCommissionAmount = (comm: Commission): number => {
-    if (comm.isFixedAmount) {
+    if (comm.incomeType === 'Bono fijo' || comm.isFixedAmount) {
       return comm.commissionPercent;
     }
     return (comm.valueGenerated * comm.commissionPercent) / 100;
@@ -1194,6 +1343,10 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setCommissions((prev) => [newComm, ...prev]);
     return newComm;
+  };
+
+  const updateCommission = (id: string, updates: Partial<Commission>) => {
+    setCommissions((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
   };
 
   const updateCommissionStatus = (id: string, status: Commission['status']) => {
@@ -1394,6 +1547,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else if (periodType === 'Trimestral') {
       ratio = 3;
       isProrated = false;
+    } else if (periodType === 'Semestral') {
+      ratio = 6;
+      isProrated = false;
     } else if (periodType === 'Anual') {
       ratio = 12;
       isProrated = false;
@@ -1479,11 +1635,19 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncPullFromNotion,
         isSyncingNotion,
         notionSyncFeedback,
+        lastNotionCheckTime,
+        checkForNotionEdits,
         leads,
         filteredLeads,
         addLead,
         updateLead,
         deleteLead,
+        archiveLead,
+        unarchiveLead,
+        saveLeadDirectToNotion,
+        pendingArchivalSuggestion,
+        dismissArchivalSuggestion,
+        confirmArchivalSuggestion,
         checkCrossCompanyConflict,
         evaluateLeadICP,
         confirmLeadICPScore,
@@ -1500,6 +1664,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         commissions,
         filteredCommissions,
         addCommission,
+        updateCommission,
         updateCommissionStatus,
         calculateCommissionAmount,
         resources,

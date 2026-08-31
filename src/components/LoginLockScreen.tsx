@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useCRM } from '../context/CRMContext';
 import {
   ShieldCheck,
@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const LoginLockScreen: React.FC = () => {
@@ -36,23 +37,86 @@ export const LoginLockScreen: React.FC = () => {
   // UI status
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [googleClientReady, setGoogleClientReady] = useState(false);
 
-  // Handle Google Login
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
+  // Initialize Google Identity Services if available in window
+  useEffect(() => {
+    const checkGSI = () => {
+      const g = (window as any).google;
+      if (g && g.accounts) {
+        setGoogleClientReady(true);
+      }
+    };
+
+    checkGSI();
+    const timer = setInterval(checkGSI, 500);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Handle Google Login via OAuth2 popup or GSI token
   const handleGoogleLogin = async () => {
     setErrorMsg(null);
     setIsLoading(true);
 
     try {
-      const result = await loginWithGoogle();
-      if (!result.success) {
-        setErrorMsg(
-          result.error ||
-            'No se pudo verificar la cuenta de Google. Verifica que sea la cuenta autorizada del CRM.'
-        );
-        setIsLoading(false);
+      const g = (window as any).google;
+
+      // 1. Try Google Identity Services OAuth2 Token Client
+      if (g && g.accounts && g.accounts.oauth2) {
+        const clientId =
+          (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
+          '658294037698-crm-bdr-psd.apps.googleusercontent.com';
+
+        try {
+          const client = g.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: 'email profile openid',
+            callback: async (tokenResponse: any) => {
+              if (tokenResponse && tokenResponse.access_token) {
+                const result = await loginWithGoogle(tokenResponse.access_token);
+                if (!result.success) {
+                  setErrorMsg(
+                    result.error ||
+                      'Acceso denegado: La cuenta seleccionada no está autorizada para este CRM privado.'
+                  );
+                }
+              } else if (tokenResponse && tokenResponse.error) {
+                if (tokenResponse.error !== 'popup_closed_by_user') {
+                  setErrorMsg(
+                    `Error de Google Sign-In: ${tokenResponse.error}. Puedes ingresar con tu contraseña en la pestaña 'Contraseña'.`
+                  );
+                }
+              }
+              setIsLoading(false);
+            },
+            error_callback: (err: any) => {
+              console.warn('Google Token Client error:', err);
+              setErrorMsg(
+                'No se pudo abrir la ventana de Google. Puedes ingresar con tu contraseña en la pestaña "Contraseña".'
+              );
+              setIsLoading(false);
+            },
+          });
+
+          client.requestAccessToken({ prompt: 'select_account' });
+          return;
+        } catch (initErr) {
+          console.warn('GSI TokenClient init exception:', initErr);
+        }
       }
+
+      // If GIS client is not fully configured, provide prompt guidance
+      setErrorMsg(
+        'Para acceder de inmediato, ingresa con tu correo y contraseña en la pestaña "Contraseña" o configura tu Google Client ID en el servidor.'
+      );
+      setIsLoading(false);
     } catch (err: any) {
-      setErrorMsg('Error de conexión al iniciar sesión con Google.');
+      console.error('Google Sign-In caught error:', err);
+      setErrorMsg(
+        'Error al conectar con el servicio de autenticación de Google. Utiliza la pestaña "Contraseña".'
+      );
       setIsLoading(false);
     }
   };
@@ -118,7 +182,7 @@ export const LoginLockScreen: React.FC = () => {
         <button
           id="btn-lock-theme-toggle"
           onClick={toggleDarkMode}
-          className="p-2 rounded-xl text-stone-600 dark:text-stone-300 hover:bg-stone-200/70 dark:hover:bg-stone-800 border border-stone-300/80 dark:border-stone-700/80 transition"
+          className="p-2 rounded-xl text-stone-600 dark:text-stone-300 hover:bg-stone-200/70 dark:hover:bg-stone-800 border border-stone-300/80 dark:border-stone-700/80 transition cursor-pointer"
           title={isDarkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
           aria-label="Toggle theme"
         >
@@ -143,7 +207,7 @@ export const LoginLockScreen: React.FC = () => {
               Acceso Seguro al CRM
             </h1>
             <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 leading-relaxed">
-              Ingresa tus credenciales o inicia sesión con tu Cuenta de Google autorizada.
+              Autenticación obligatoria previa. Ingresa tus credenciales autorizadas o selecciona tu cuenta de Google.
             </p>
           </div>
 
@@ -156,7 +220,7 @@ export const LoginLockScreen: React.FC = () => {
                 setAuthMode('google');
                 setErrorMsg(null);
               }}
-              className={`py-2 px-3 rounded-lg flex items-center justify-center space-x-2 transition ${
+              className={`py-2 px-3 rounded-lg flex items-center justify-center space-x-2 transition cursor-pointer ${
                 authMode === 'google'
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
@@ -190,7 +254,7 @@ export const LoginLockScreen: React.FC = () => {
                 setAuthMode('password');
                 setErrorMsg(null);
               }}
-              className={`py-2 px-3 rounded-lg flex items-center justify-center space-x-2 transition ${
+              className={`py-2 px-3 rounded-lg flex items-center justify-center space-x-2 transition cursor-pointer ${
                 authMode === 'password'
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
@@ -216,7 +280,7 @@ export const LoginLockScreen: React.FC = () => {
           {authMode === 'google' && (
             <div className="space-y-4 animate-fadeIn">
               <p className="text-xs text-stone-600 dark:text-stone-400 text-center">
-                Autenticación directa con Google Identity y verificación federada de cuenta.
+                Verificación federada con Google Identity. Solo la cuenta autorizada tiene acceso.
               </p>
 
               <button
@@ -224,7 +288,7 @@ export const LoginLockScreen: React.FC = () => {
                 type="button"
                 disabled={isLoading}
                 onClick={handleGoogleLogin}
-                className="w-full py-3 px-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-white hover:bg-stone-50 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-white text-sm font-semibold flex items-center justify-center space-x-3 transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed hover:border-stone-400 dark:hover:border-stone-600"
+                className="w-full py-3 px-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-white hover:bg-stone-50 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-white text-sm font-semibold flex items-center justify-center space-x-3 transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed hover:border-stone-400 dark:hover:border-stone-600 cursor-pointer"
               >
                 {isLoading ? (
                   <span className="flex items-center space-x-2">
@@ -308,7 +372,7 @@ export const LoginLockScreen: React.FC = () => {
                     type="button"
                     tabIndex={-1}
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-pointer"
                   >
                     {showPassword ? (
                       <EyeOff className="w-4 h-4" />
@@ -323,7 +387,7 @@ export const LoginLockScreen: React.FC = () => {
                 id="btn-password-sign-in"
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 px-4 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 text-xs font-bold transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                className="w-full py-2.5 px-4 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 text-xs font-bold transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 cursor-pointer"
               >
                 {isLoading ? (
                   <>

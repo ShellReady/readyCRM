@@ -40,7 +40,13 @@ import {
   ThumbsDown,
   RefreshCw,
   Check,
+  Archive,
+  ArchiveRestore,
+  Inbox,
+  Sparkle,
+  CheckCheck,
 } from 'lucide-react';
+import { ConfirmWordModal } from '../common/ConfirmWordModal';
 
 const STAGES: { id: CRMStage; label: string; color: string }[] = [
   { id: 'Identificado', label: 'Identificado', color: 'bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300' },
@@ -70,6 +76,11 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
     addLead,
     updateLead,
     deleteLead,
+    archiveLead,
+    unarchiveLead,
+    pendingArchivalSuggestion,
+    dismissArchivalSuggestion,
+    confirmArchivalSuggestion,
     checkCrossCompanyConflict,
     getLeadInteractions,
     addInteraction,
@@ -82,6 +93,7 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
   } = useCRM();
 
   const [viewMode, setViewMode] = useState<'kanban' | 'table'>('kanban');
+  const [archiveTab, setArchiveTab] = useState<'active' | 'archived' | 'all'>('active');
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [semaforoFilter, setSemaforoFilter] = useState<string>('all');
@@ -102,6 +114,7 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
 
   // New Lead Modal
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [newLeadCompanyId, setNewLeadCompanyId] = useState(
     selectedCompanyId !== 'all' ? selectedCompanyId : companies[0]?.id || ''
   );
@@ -129,8 +142,17 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
   const [interactionType, setInteractionType] = useState<InteractionType>('Seguimiento');
   const [interactionNote, setInteractionNote] = useState('');
 
+  // Count by archival status
+  const activeCount = filteredLeads.filter((l) => !l.isArchived).length;
+  const archivedCount = filteredLeads.filter((l) => !!l.isArchived).length;
+  const totalCount = filteredLeads.length;
+
   // Filter leads
   const searchedLeads = filteredLeads.filter((l) => {
+    // Archival tab condition
+    if (archiveTab === 'active' && l.isArchived) return false;
+    if (archiveTab === 'archived' && !l.isArchived) return false;
+
     const matchesSearch =
       l.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       l.companyContact.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -253,6 +275,41 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
 
   return (
     <div id="screen-pipeline" className="space-y-6 animate-fadeIn">
+      {/* Archival Suggestion Floating Banner */}
+      {pendingArchivalSuggestion && (
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-slideDown">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-900/80 text-amber-800 dark:text-amber-300">
+              <Archive className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-200">
+                ¿Archivar prospecto cerrado?
+              </h4>
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                Has marcado a <span className="font-semibold">{pendingArchivalSuggestion.lead.name}</span> como{' '}
+                <span className="font-semibold">{pendingArchivalSuggestion.suggestedStage}</span>. ¿Deseas archivarlo para mantener el Pipeline activo despejado?
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+            <button
+              onClick={() => dismissArchivalSuggestion()}
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl text-stone-600 dark:text-stone-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition"
+            >
+              Mantener en Pipeline Activo
+            </button>
+            <button
+              onClick={() => confirmArchivalSuggestion(true)}
+              className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition"
+            >
+              <Archive className="w-3.5 h-3.5" />
+              <span>Archivar Lead</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Header & Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -264,7 +321,43 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Archival Status Switcher Tabs */}
+          <div className="flex items-center p-1 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-100 dark:bg-stone-800">
+            <button
+              onClick={() => setArchiveTab('active')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition inline-flex items-center space-x-1.5 ${
+                archiveTab === 'active'
+                  ? 'bg-white dark:bg-stone-700 text-stone-900 dark:text-white shadow-2xs'
+                  : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
+              }`}
+            >
+              <Inbox className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Activos ({activeCount})</span>
+            </button>
+            <button
+              onClick={() => setArchiveTab('archived')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition inline-flex items-center space-x-1.5 ${
+                archiveTab === 'archived'
+                  ? 'bg-white dark:bg-stone-700 text-stone-900 dark:text-white shadow-2xs'
+                  : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
+              }`}
+            >
+              <Archive className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Archivados ({archivedCount})</span>
+            </button>
+            <button
+              onClick={() => setArchiveTab('all')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition inline-flex items-center space-x-1.5 ${
+                archiveTab === 'all'
+                  ? 'bg-white dark:bg-stone-700 text-stone-900 dark:text-white shadow-2xs'
+                  : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
+              }`}
+            >
+              <span>Todos ({totalCount})</span>
+            </button>
+          </div>
+
           {/* View Toggle */}
           <div className="flex items-center p-1 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-100 dark:bg-stone-800">
             <button
@@ -620,11 +713,30 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
           {/* Header */}
           <div className="p-4 sm:p-5 border-b border-stone-200 dark:border-stone-800 flex items-start justify-between bg-stone-50/50 dark:bg-stone-800/50">
             <div className="space-y-1">
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300">
                   {companies.find((c) => c.id === activeLead.companyId)?.name}
                 </span>
-                <span className="text-xs text-stone-400 font-mono">ID: {activeLead.id}</span>
+                {activeLead.isArchived ? (
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center space-x-1">
+                    <Archive className="w-3 h-3" />
+                    <span>Archivado ({activeLead.archivedReason || 'Cerrado'})</span>
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 inline-flex items-center space-x-1">
+                    <Inbox className="w-3 h-3" />
+                    <span>Lead Activo</span>
+                  </span>
+                )}
+                {activeLead.notionPageId ? (
+                  <span
+                    className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 border border-stone-200 dark:border-stone-700 inline-flex items-center space-x-1"
+                    title={`Sincronizado en Notion. Page ID: ${activeLead.notionPageId}`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span>Notion Sync</span>
+                  </span>
+                ) : null}
               </div>
               <h2 className="text-lg font-bold text-stone-900 dark:text-white">
                 {activeLead.name}
@@ -1193,23 +1305,44 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
           </div>
 
           {/* Drawer Footer */}
-          <div className="p-4 border-t border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/40 flex items-center justify-between">
-            <button
-              onClick={() => {
-                if (confirm(`¿Eliminar al prospecto ${activeLead.name}?`)) {
-                  deleteLead(activeLead.id);
-                  onSelectLead(null);
-                }
-              }}
-              className="text-xs text-rose-600 hover:text-rose-700 font-medium inline-flex items-center space-x-1"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Eliminar Lead</span>
-            </button>
+          <div className="p-4 border-t border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/40 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(true)}
+                className="text-xs text-rose-600 hover:text-rose-700 font-medium inline-flex items-center space-x-1 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                title="Eliminar permanentemente"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Eliminar</span>
+              </button>
+
+              {activeLead.isArchived ? (
+                <button
+                  onClick={() => {
+                    unarchiveLead(activeLead.id);
+                  }}
+                  className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition"
+                >
+                  <ArchiveRestore className="w-3.5 h-3.5" />
+                  <span>Desarchivar / Reactivar</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    archiveLead(activeLead.id, activeLead.stage);
+                  }}
+                  className="text-xs text-amber-700 dark:text-amber-300 font-semibold inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition"
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  <span>Archivar Lead</span>
+                </button>
+              )}
+            </div>
 
             <button
               onClick={() => onSelectLead(null)}
-              className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-stone-900 dark:bg-white text-white dark:text-stone-900"
+              className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-stone-900 dark:bg-white text-white dark:text-stone-900 shadow-sm"
             >
               Listo
             </button>
@@ -1435,6 +1568,27 @@ export const PipelineScreen: React.FC<PipelineScreenProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Modal de Confirmación con Palabra 'confirmar' para Eliminar Prospecto */}
+      {activeLead && (
+        <ConfirmWordModal
+          isOpen={isDeleteModalOpen}
+          title={`¿Eliminar prospecto ${activeLead.name}?`}
+          description={`Esta acción eliminará permanentemente al prospecto de la empresa ${
+            companies.find((c) => c.id === activeLead.companyId)?.name || ''
+          }, junto con todo su historial de interacciones, tareas y sincronización.`}
+          details={`Prospecto: ${activeLead.name} (${activeLead.companyContact || 'Sin empresa'}) — Etapa: ${activeLead.stage}`}
+          requiredWord="confirmar"
+          confirmButtonText="Eliminar Prospecto"
+          confirmButtonVariant="danger"
+          onConfirm={() => {
+            deleteLead(activeLead.id);
+            onSelectLead(null);
+            setIsDeleteModalOpen(false);
+          }}
+          onCancel={() => setIsDeleteModalOpen(false)}
+        />
       )}
     </div>
   );

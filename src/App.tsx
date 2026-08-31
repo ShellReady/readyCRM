@@ -93,7 +93,9 @@ function MainApp() {
 
           {activeTab === 'reportes' && <ReportesScreen />}
 
-          {activeTab === 'comisiones' && <ComisionesScreen />}
+          {activeTab === 'comisiones' && (
+            <ComisionesScreen onSelectLead={handleSelectLead} />
+          )}
 
           {activeTab === 'recursos' && <RecursosGlosarioScreen />}
 

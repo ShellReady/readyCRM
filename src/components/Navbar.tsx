@@ -155,22 +155,25 @@ export const Navbar: React.FC<NavbarProps> = ({ mobileMenuOpen, setMobileMenuOpe
             </button>
           </div>
 
-          {/* Notion Quick Sync Button */}
+          {/* Notion Quick Sync Button & Real-time Live Badge */}
           {notionConfig.apiKey && (
             <button
               id="btn-navbar-notion-sync"
               onClick={() => syncPushToNotion()}
               disabled={isSyncingNotion}
-              className="p-2 rounded-lg text-purple-700 dark:text-purple-300 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 border border-purple-200 dark:border-purple-800 focus:outline-none transition flex items-center space-x-1.5 text-xs font-semibold"
+              className="px-2.5 py-1.5 rounded-lg text-purple-700 dark:text-purple-300 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 border border-purple-200 dark:border-purple-800 focus:outline-none transition flex items-center space-x-1.5 text-xs font-semibold"
               title={
-                notionConfig.lastSyncedAt
-                  ? `Sincronizado con Notion: ${new Date(notionConfig.lastSyncedAt).toLocaleTimeString()}`
-                  : 'Sincronizar CRM con Notion'
+                isSyncingNotion
+                  ? 'Sincronizando bidireccionalmente con Notion...'
+                  : notionConfig.lastSyncedAt
+                  ? `Sincronizado con Notion: ${new Date(notionConfig.lastSyncedAt).toLocaleTimeString('es-ES')}`
+                  : 'Sincronización en tiempo real con Notion activa'
               }
               aria-label="Sincronizar con Notion"
             >
+              <span className={`w-2 h-2 rounded-full ${isSyncingNotion ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncingNotion ? 'animate-spin text-purple-600' : ''}`} />
-              <span className="hidden sm:inline">Notion</span>
+              <span className="hidden sm:inline">Notion Sync</span>
             </button>
           )}
 

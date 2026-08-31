@@ -48,6 +48,7 @@ import {
   generateNotionMarkdownGuide,
   downloadFile,
 } from '../../utils/notionSchemaGenerator';
+import { ConfirmWordModal } from '../common/ConfirmWordModal';
 
 export const ConfiguracionScreen: React.FC = () => {
   const {
@@ -82,6 +83,8 @@ export const ConfiguracionScreen: React.FC = () => {
   const [selectedCompanyId, setSelectedCompanyId] = useState(companies[0]?.id || '');
   const [isSaved, setIsSaved] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
 
   // Notion Integration Form State
   const [notionApiKey, setNotionApiKey] = useState(notionConfig.apiKey || '');
@@ -238,19 +241,25 @@ export const ConfiguracionScreen: React.FC = () => {
   };
 
   const handleClearData = () => {
-    if (window.confirm('¿Confirmas limpiar todos los prospectos, interacciones y métricas para el lanzamiento oficial?')) {
-      clearAllLeadsAndData();
-      setDataMessage('Base de datos inicializada en blanco (0 registros). Sistema listo para lanzamiento oficial.');
-      setTimeout(() => setDataMessage(null), 5000);
-    }
+    setIsClearModalOpen(true);
+  };
+
+  const executeClearData = () => {
+    clearAllLeadsAndData();
+    setIsClearModalOpen(false);
+    setDataMessage('Base de datos inicializada en blanco (0 registros). Sistema listo para lanzamiento oficial.');
+    setTimeout(() => setDataMessage(null), 5000);
   };
 
   const handleRestoreSample = () => {
-    if (window.confirm('¿Deseas restaurar los 9 prospectos de ejemplo y datos de prueba completos?')) {
-      restoreDefaultSampleData();
-      setDataMessage('9 prospectos de ejemplo y flujo de demostración restaurados con éxito.');
-      setTimeout(() => setDataMessage(null), 5000);
-    }
+    setIsRestoreModalOpen(true);
+  };
+
+  const executeRestoreSample = () => {
+    restoreDefaultSampleData();
+    setIsRestoreModalOpen(false);
+    setDataMessage('15 prospectos de ejemplo (5 por cada empresa) y flujo comercial completo restaurados con éxito.');
+    setTimeout(() => setDataMessage(null), 5000);
   };
 
   const handleAddBlock = (e: React.FormEvent) => {
@@ -759,6 +768,28 @@ export const ConfiguracionScreen: React.FC = () => {
           </button>
         </div>
 
+        {/* Live Atomic Sync & Archival Badge Card */}
+        <div className="p-3.5 rounded-xl bg-purple-50/50 dark:bg-purple-950/30 border border-purple-200/80 dark:border-purple-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300">
+              <FolderSync className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="font-bold text-stone-900 dark:text-white">
+                Sincronización Atómica en Tiempo Real & Archivado Inteligente
+              </p>
+              <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                Cada creación, edición, cambio de fase o archivado de prospecto se actualiza en Notion instantáneamente en segundo plano, sin requerir subidas manuales constantes.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 shrink-0">
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-white dark:bg-stone-800 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 font-semibold">
+              Live Sync: Activo
+            </span>
+          </div>
+        </div>
+
         {/* Test Result Message */}
         {notionTestResult && (
           <div
@@ -1233,7 +1264,7 @@ export const ConfiguracionScreen: React.FC = () => {
         </div>
 
         <p className="text-xs text-stone-500 dark:text-stone-400">
-          Gestiona el estado de los registros locales. El sistema cuenta con <strong>9 prospectos de ejemplo</strong> para
+          Gestiona el estado de los registros locales. El sistema cuenta con <strong>15 prospectos de ejemplo</strong> (5 por cada una de las empresas) para
           pruebas operativas completas, y permite limpiar todos los registros para iniciar la operación comercial real sin
           datos previos.
         </p>
@@ -1280,10 +1311,35 @@ export const ConfiguracionScreen: React.FC = () => {
             className="flex-1 inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700 text-xs font-semibold transition shadow-2xs"
           >
             <RefreshCw className="w-3.5 h-3.5 text-stone-500" />
-            <span>Cargar 9 Prospectos de Ejemplo</span>
+            <span>Cargar 15 Prospectos de Ejemplo (5 por Empresa)</span>
           </button>
         </div>
       </div>
+
+      {/* Modal de Confirmación para Limpiar Base de Datos */}
+      <ConfirmWordModal
+        isOpen={isClearModalOpen}
+        title="¿Limpiar todo el sistema para Lanzamiento?"
+        description="Esta acción eliminará todos los prospectos, interacciones, reuniones, propuestas y comisiones locales para dejar la base de datos completamente en blanco (0 registros) lista para producción comercial."
+        details={`Registros a eliminar: ${leads.length} prospectos, ${interactions.length} interacciones, ${meetings.length} reuniones, ${commissions.length} comisiones.`}
+        requiredWord="confirmar"
+        confirmButtonText="Limpiar Sistema (0 registros)"
+        confirmButtonVariant="danger"
+        onConfirm={executeClearData}
+        onCancel={() => setIsClearModalOpen(false)}
+      />
+
+      {/* Modal de Confirmación para Restaurar 15 Prospectos */}
+      <ConfirmWordModal
+        isOpen={isRestoreModalOpen}
+        title="¿Cargar 15 Prospectos de Ejemplo?"
+        description="Esta acción reemplazará los datos actuales y cargará 15 prospectos de ejemplo distribuidos equitativamente entre las 3 empresas (5 en SaaS Scale Latam, 5 en Growth Agency X y 5 en Fintech B2B Payments), junto con sus interacciones, reuniones y propuestas."
+        requiredWord="confirmar"
+        confirmButtonText="Cargar 15 Prospectos"
+        confirmButtonVariant="warning"
+        onConfirm={executeRestoreSample}
+        onCancel={() => setIsRestoreModalOpen(false)}
+      />
     </div>
   );
 };

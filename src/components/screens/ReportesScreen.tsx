@@ -16,6 +16,7 @@ import {
   TrendingUp,
   AlertCircle,
 } from 'lucide-react';
+import { CalendarDateRangePicker } from '../common/CalendarDateRangePicker';
 
 export const ReportesScreen: React.FC = () => {
   const {
@@ -46,6 +47,60 @@ export const ReportesScreen: React.FC = () => {
   // Target company for report
   const reportCompanyId = selectedCompanyId !== 'all' ? selectedCompanyId : companies[0]?.id || '';
   const currentCompany = companies.find((c) => c.id === reportCompanyId) || companies[0];
+
+  // Helper to sync frequency selection with dates
+  const handlePeriodTypeChange = (newPeriod: PeriodType) => {
+    setPeriodType(newPeriod);
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    if (newPeriod === 'Diario') {
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    } else if (newPeriod === 'Semanal') {
+      const s = new Date(today);
+      s.setDate(today.getDate() - 7);
+      setStartDate(s.toISOString().split('T')[0]);
+      setEndDate(todayStr);
+    } else if (newPeriod === 'Quincenal') {
+      const s = new Date(today);
+      s.setDate(today.getDate() - 15);
+      setStartDate(s.toISOString().split('T')[0]);
+      setEndDate(todayStr);
+    } else if (newPeriod === 'Mensual') {
+      const s = new Date(today.getFullYear(), today.getMonth(), 1);
+      const e = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      setStartDate(s.toISOString().split('T')[0]);
+      setEndDate(e.toISOString().split('T')[0]);
+    } else if (newPeriod === 'Trimestral') {
+      const qMonth = Math.floor(today.getMonth() / 3) * 3;
+      const s = new Date(today.getFullYear(), qMonth, 1);
+      const e = new Date(today.getFullYear(), qMonth + 3, 0);
+      setStartDate(s.toISOString().split('T')[0]);
+      setEndDate(e.toISOString().split('T')[0]);
+    } else if (newPeriod === 'Semestral') {
+      const s = new Date(today);
+      s.setMonth(today.getMonth() - 5);
+      s.setDate(1);
+      const e = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      setStartDate(s.toISOString().split('T')[0]);
+      setEndDate(e.toISOString().split('T')[0]);
+    } else if (newPeriod === 'Anual') {
+      const s = new Date(today.getFullYear(), 0, 1);
+      const e = new Date(today.getFullYear(), 11, 31);
+      setStartDate(s.toISOString().split('T')[0]);
+      setEndDate(e.toISOString().split('T')[0]);
+    }
+  };
+
+  // Helper when user selects dates via visual calendar
+  const handleCalendarRangeChange = (start: string, end: string, pType?: PeriodType) => {
+    setStartDate(start);
+    setEndDate(end);
+    if (pType) {
+      setPeriodType(pType);
+    }
+  };
 
   // Calculate funnel metrics
   const funnelData = calculateFunnelForPeriod(reportCompanyId, periodType, startDate, endDate);
@@ -169,65 +224,55 @@ ${recentObjections.length > 0 ? recentObjections.map((o) => `• "${o}"`).join('
         </div>
       </div>
 
-      {/* Control Panel: Company + Period + Date Filter */}
-      <div className="p-4 rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-2xs grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-        <div className="sm:col-span-4">
-          <label className="block text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-1">
-            Empresa para el Reporte
-          </label>
-          <select
-            value={reportCompanyId}
-            onChange={(e) => setSelectedCompanyId(e.target.value)}
-            className="w-full text-xs p-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white font-medium"
-          >
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.cycleType})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="sm:col-span-3">
-          <label className="block text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-1">
-            Frecuencia
-          </label>
-          <select
-            value={periodType}
-            onChange={(e) => setPeriodType(e.target.value as PeriodType)}
-            className="w-full text-xs p-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
-          >
-            <option value="Diario">Diario</option>
-            <option value="Semanal">Semanal</option>
-            <option value="Quincenal">Quincenal</option>
-            <option value="Mensual">Mensual</option>
-            <option value="Trimestral">Trimestral</option>
-            <option value="Anual">Anual</option>
-            <option value="Rango personalizado">Rango personalizado</option>
-          </select>
-        </div>
-
-        <div className="sm:col-span-5 grid grid-cols-2 gap-2">
-          <div>
+      {/* Control Panel: Company + Period Preset + Interactive Visual Calendar */}
+      <div className="p-4 sm:p-5 rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-2xs space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+          <div className="lg:col-span-4">
             <label className="block text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-1">
-              Desde
+              Empresa para el Reporte
             </label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full text-xs p-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
-            />
+            <select
+              value={reportCompanyId}
+              onChange={(e) => setSelectedCompanyId(e.target.value)}
+              className="w-full text-xs p-2 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white font-medium shadow-2xs"
+            >
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.cycleType})
+                </option>
+              ))}
+            </select>
           </div>
-          <div>
+
+          <div className="lg:col-span-3">
             <label className="block text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-1">
-              Hasta
+              Frecuencia Preestablecida
             </label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full text-xs p-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white"
+            <select
+              value={periodType}
+              onChange={(e) => handlePeriodTypeChange(e.target.value as PeriodType)}
+              className="w-full text-xs p-2 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white shadow-2xs font-medium"
+            >
+              <option value="Diario">Diario (Hoy)</option>
+              <option value="Semanal">Semanal (7 días)</option>
+              <option value="Quincenal">Quincenal (15 días)</option>
+              <option value="Mensual">Mensual (Mes en curso)</option>
+              <option value="Trimestral">Trimestral (90 días)</option>
+              <option value="Semestral">Semestral (6 meses)</option>
+              <option value="Anual">Anual (Año completo)</option>
+              <option value="Rango personalizado">Rango personalizado</option>
+            </select>
+          </div>
+
+          <div className="lg:col-span-5">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-1">
+              Periodo & Fechas (Visual en Calendario)
+            </label>
+            <CalendarDateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              periodType={periodType}
+              onChange={handleCalendarRangeChange}
             />
           </div>
         </div>

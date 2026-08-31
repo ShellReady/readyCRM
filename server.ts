@@ -18,6 +18,9 @@ import {
   testNotionConnection,
   pushDataToNotion,
   pullDataFromNotion,
+  saveLeadToNotion,
+  deletePageInNotion,
+  checkNotionUpdates,
 } from "./server/notion";
 
 dotenv.config();
@@ -240,6 +243,53 @@ app.post("/api/notion/pull-all", requireAuthMiddleware, async (req, res) => {
   } catch (error: any) {
     console.error("Notion Pull error:", error);
     return res.status(500).json({ success: false, error: "Error al descargar datos desde Notion." });
+  }
+});
+
+// Save or Update Single Lead in Notion (Atomic Mutation)
+app.post("/api/notion/save-lead", requireAuthMiddleware, async (req, res) => {
+  try {
+    const { apiKey, prospectsDbId, lead, companies } = req.body || {};
+    if (!lead) {
+      return res.status(400).json({ success: false, error: "Faltan datos del lead a guardar." });
+    }
+    const result罕 = await saveLeadToNotion({
+      apiKey,
+      prospectsDbId,
+      lead,
+      companies,
+    });
+    return res.json(result罕);
+  } catch (error: any) {
+    console.error("Notion save-lead error:", error);
+    return res.status(500).json({ success: false, error: "Error al guardar el prospecto en Notion." });
+  }
+});
+
+// Delete / Archive Page in Notion (One-way deletion)
+app.post("/api/notion/delete-page", requireAuthMiddleware, async (req, res) => {
+  try {
+    const { apiKey, pageId } = req.body || {};
+    if (!pageId) {
+      return res.status(400).json({ success: false, error: "Falta el ID de página a eliminar." });
+    }
+    const result = await deletePageInNotion({ apiKey, pageId });
+    return res.json(result);
+  } catch (error: any) {
+    console.error("Notion delete-page error:", error);
+    return res.status(500).json({ success: false, error: "Error al eliminar en Notion." });
+  }
+});
+
+// Check if Notion has fresh updates
+app.post("/api/notion/check-updates", requireAuthMiddleware, async (req, res) => {
+  try {
+    const { apiKey, prospectsDbId, lastCheckedTime } = req.body || {};
+    const result = await checkNotionUpdates({ apiKey, prospectsDbId, lastCheckedTime });
+    return res.json(result);
+  } catch (error: any) {
+    console.error("Notion check-updates error:", error);
+    return res.status(500).json({ success: false, error: "Error al verificar actualizaciones en Notion." });
   }
 });
 

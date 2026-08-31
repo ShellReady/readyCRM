@@ -76,6 +76,12 @@ export interface Lead {
   summaryUpdatedAt: string;
   followUpDate: string; // SLA date
   createdAt: string;
+  // Notion integration & Archival metadata
+  notionPageId?: string;
+  notionLastEditedTime?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedReason?: string;
 }
 
 export type WorkBlockType =
@@ -154,22 +160,27 @@ export interface Proposal {
   createdAt: string;
 }
 
-export type CommissionEventType = 'Agendamiento' | 'Venta cerrada';
+export type CommissionEventType = 'Agendado' | 'Cerrado' | 'Agendamiento' | 'Venta cerrada';
+export type CommissionIncomeType = 'Bono fijo' | 'Comisión %';
 export type CommissionStatus = 'Pendiente' | 'Aprobada' | 'Pagada';
 
 export interface Commission {
   id: string;
   eventType: CommissionEventType;
+  incomeType?: CommissionIncomeType;
   companyId: string; // Relation → Empresas
-  leadId: string; // Relation → Leads
-  productName?: string; // Solo si Tipo = Venta cerrada
+  leadId?: string; // Relation → Leads (Prospecto agendado)
+  leadName?: string; // Nombre del prospecto agendado
+  concept?: string; // Concepto o deal
+  productName?: string; // Solo si Tipo = Cerrado
+  meetingDate?: string; // Fecha de reunión agendada o cierre
   valueGenerated: number; // Valor generado para la empresa ($)
   commissionPercent: number; // % o ratio de comisión acordado (e.g. 10 para 10%, o 100 si fijo)
   isFixedAmount?: boolean;
   status: CommissionStatus;
   date: string;
   notes?: string;
-  // Nota: La comisión ganada se calcula vía fórmula (Valor generado * % comisión / 100)
+  // Nota: La comisión ganada se calcula vía fórmula (Valor generado * % comisión / 100 o bono fijo)
 }
 
 export type ResourceType = 'Video' | 'Documento' | 'Plantilla' | 'Guion';
@@ -242,6 +253,7 @@ export type PeriodType =
   | 'Quincenal'
   | 'Mensual'
   | 'Trimestral'
+  | 'Semestral'
   | 'Anual'
   | 'Rango personalizado';
 
